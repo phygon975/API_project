@@ -124,6 +124,50 @@ volume, cost = reactorCSTR(
 - **.bkp**: Aspen Plus 백업 파일  
 - **.apwz**: Aspen Plus 압축 프로젝트 파일
 
+## 기여하기
+
+이 프로젝트에 기여하고 싶으시다면:
+
+1. 이 저장소를 포크하세요
+2. 새로운 기능 브랜치를 만드세요 (`git checkout -b feature/AmazingFeature`)
+3. 변경사항을 커밋하세요 (`git commit -m 'Add some AmazingFeature'`)
+4. 브랜치에 푸시하세요 (`git push origin feature/AmazingFeature`)
+5. Pull Request를 생성하세요
+
+## 라이선스
+
+이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 `LICENSE` 파일을 참조하세요.
+
+## 연락처
+
+프로젝트에 대한 질문이나 제안사항이 있으시면 [이슈](https://github.com/phygon975/API_project/issues)를 생성해주세요.
+# 열교환기 모듈
+from HeatExchanger import heatexchanger
+total_cost, individual_costs, heat_duties, areas = heatexchanger(
+    Application, No_Heat_Exchanger, fouling_factor, E_FM, E_FL, cost_index
+)
+
+# 증류탑 모듈
+from Distillation import distillationRADFRAC
+cost, diameter, volume = distillationRADFRAC(
+    Application, column_name, tray_spacing, top_space, bottom_space, 
+    density, material_factor, cost_index
+)
+
+# 반응기 모듈
+from Reactor import reactorCSTR
+volume, cost = reactorCSTR(
+    Application, liquid_fill, h_d_ratio, material_factor, 
+    density, reactor_name, cost_index
+)
+```
+
+## 지원되는 파일 형식
+
+- **.apw**: Aspen Plus 프로젝트 파일
+- **.bkp**: Aspen Plus 백업 파일  
+- **.apwz**: Aspen Plus 압축 프로젝트 파일
+
 ## 지원되는 블록 타입
 
 ### 열교환기 (Heat Exchangers)
@@ -267,3 +311,6 @@ if block_categories['new_equipment']:
 ## 연락처
 
 문의사항이나 지원이 필요한 경우 이슈를 등록해주세요.
+=======
+# API_project
+>>>>>>> ba196a8374708717c207e21ce58f6f8f529b900c
