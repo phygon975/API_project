@@ -1,43 +1,21 @@
-# Python-Aspen-Plus-Connected-Model
+# TEA Machine - Aspen Plus 연동 장비 비용 계산기
 
-Aspen Plus 시뮬레이션 파일을 자동으로 분석하고 장비 비용을 계산하는 통합 도구입니다. Record Type 기반 스마트 장비 탐지 시스템을 통해 정확한 장비 분류와 비용 계산을 제공합니다.
+Aspen Plus 시뮬레이션 파일을 분석하여 장비 비용을 자동으로 계산하는 Python 도구입니다.
 
 ## 주요 기능
 
-- **스마트 장비 탐지**: Record Type 기반 자동 장비 분류 시스템
-- **자동 파일 로드**: .apw, .bkp, .apwz 파일 자동 감지 및 로드
-- **블록 자동 감지**: 시뮬레이션의 모든 장비 블록을 자동으로 찾아서 분류
-- **상세 정보 추출**: 각 블록의 온도, 압력, 열부하, 부피, 면적 등의 정보 자동 추출
-- **장비 비용 계산**: 열교환기, 증류탑, 반응기, 펌프, 압축기, 진공 시스템 등의 장비 비용 자동 계산
-- **결과 저장**: 분석 결과를 JSON 형식으로 저장
-- **일괄 처리**: 여러 파일을 한 번에 분석 가능
+- **Aspen Plus 파일 분석**: .bkp 파일을 직접 읽어서 장비 정보 추출
+- **장비 자동 분류**: 열교환기, 증류탑, 반응기, 펌프, 진공 시스템, 증발기 등 자동 분류
+- **비용 계산**: 각 장비별 상세 비용 계산
+- **결과 출력**: JSON 형식으로 결과 저장
 
-## 프로젝트 구조
+## 파일 구조
 
 ```
-├── TotalEquipmentCostCalculator.py    # 전체 장비 비용 계산기 (메인)
-├── SmartEquipmentDetector.py          # 스마트 장비 탐지 시스템
-├── 0Heat-Exchanger/                   # 열교환기 모듈
-│   ├── HeatExchanger.py
-│   └── README.md
-├── 1Distillation/                     # 증류탑 모듈
-│   ├── Distillation.py
-│   └── README.md
-├── 2Reactor/                          # 반응기 모듈
-│   ├── Reactor.py
-│   └── README.md
-├── 3Pumps/                            # 펌프 모듈
-│   ├── pumps.py
-│   └── README.md
-├── 4Vacuum-System/                    # 진공 시스템 모듈
-│   ├── vacuumoperation.py
-│   └── README.md
-├── 5Evaporator/                       # 증발기 모듈
-│   ├── Evaporator.py
-│   └── README.md
-├── Pictures/                          # 예시 이미지들
-├── test_smart_detector.py             # 스마트 탐지기 테스트
-└── README.md                          # 프로젝트 설명서
+├── TEA_machine.py                          # 메인 프로그램
+├── MIX_HEFA_20250716_after_HI_v1.bkp      # Aspen Plus 시뮬레이션 파일
+├── README.md                               # 프로젝트 설명서
+└── .gitignore                              # Git 설정 파일
 ```
 
 ## 설치 및 요구사항
@@ -48,99 +26,88 @@ Aspen Plus 시뮬레이션 파일을 자동으로 분석하고 장비 비용을 
 - Aspen Plus Python 연결이 설정되어 있어야 함
 
 ### 설치 방법
-1. 모든 Python 파일을 프로젝트 폴더에 저장
+1. 프로젝트 파일들을 다운로드
 2. Aspen Plus를 실행
-3. Python에서 모듈을 import하여 사용
+3. Python에서 TEA_machine.py를 실행
 
 ## 사용법
 
-### 1. 메인 계산기 실행 (권장)
-
+### 기본 실행
 ```bash
-# 기본 사용법
-python TotalEquipmentCostCalculator.py
-
-# 또는 직접 실행
-python -c "
-from TotalEquipmentCostCalculator import main
-main()
-"
+python TEA_machine.py
 ```
 
-### 2. 스마트 장비 탐지 테스트
-
-```bash
-# 스마트 탐지기 테스트
-python test_smart_detector.py
-```
-
-### 3. Python 스크립트에서 사용
-
+### Python 스크립트에서 사용
 ```python
-from TotalEquipmentCostCalculator import TotalEquipmentCostCalculator
+from TEA_machine import analyze_equipment_costs
 
-# 계산기 초기화
-calculator = TotalEquipmentCostCalculator('MIX_HEFA_20250716_after_HI_v1.bkp')
-
-# Aspen Plus 연결
-if calculator.connect_to_aspen():
-    # 스마트 탐지 실행
-    equipment_config = calculator.smart_detect_equipment()
-    
-    # 모든 장비 비용 계산
-    results = calculator.calculate_all_equipment(equipment_config)
-    
-    # 결과 출력
-    calculator.print_summary_report(results)
+# Aspen Plus 파일 분석
+results = analyze_equipment_costs('MIX_HEFA_20250716_after_HI_v1.bkp')
+print(results)
 ```
 
-### 4. 개별 모듈 사용
+## 지원되는 장비 타입
 
-```python
-# 열교환기 모듈
-from HeatExchanger import heatexchanger
-total_cost, individual_costs, heat_duties, areas = heatexchanger(
-    Application, No_Heat_Exchanger, fouling_factor, E_FM, E_FL, cost_index
-)
+- **열교환기 (Heat Exchangers)**: E01, E02, E03, ...
+- **증류탑 (Distillation Columns)**: DIST1, DIST2, ...
+- **반응기 (Reactors)**: CSTR1, CSTR2, ...
+- **펌프 (Pumps)**: P01, P02, P03, ...
+- **진공 시스템 (Vacuum Systems)**: VAC1, VAC2, ...
+- **증발기 (Evaporators)**: EVAP1, EVAP2, EVAP3, ...
 
-# 증류탑 모듈
-from Distillation import distillationRADFRAC
-cost, diameter, volume = distillationRADFRAC(
-    Application, column_name, tray_spacing, top_space, bottom_space, 
-    density, material_factor, cost_index
-)
+## 출력 형식
 
-# 반응기 모듈
-from Reactor import reactorCSTR
-volume, cost = reactorCSTR(
-    Application, liquid_fill, h_d_ratio, material_factor, 
-    density, reactor_name, cost_index
-)
+### JSON 결과 파일 예시
+```json
+{
+  "file_path": "MIX_HEFA_20250716_after_HI_v1.bkp",
+  "total_equipment": 8,
+  "equipment_categories": {
+    "heat_exchangers": ["E01", "E02"],
+    "distillation_columns": ["DIST1"],
+    "reactors": ["CSTR1"],
+    "pumps": ["P01", "P02"],
+    "vacuum_systems": [],
+    "evaporators": ["EVAP1"]
+  },
+  "cost_analysis": {
+    "total_cost": 1250000.0,
+    "heat_exchangers_cost": 250000.0,
+    "distillation_cost": 500000.0,
+    "reactors_cost": 300000.0,
+    "pumps_cost": 100000.0,
+    "evaporators_cost": 100000.0
+  }
+}
 ```
 
-## 지원되는 파일 형식
+## 오류 처리
 
-- **.apw**: Aspen Plus 프로젝트 파일
-- **.bkp**: Aspen Plus 백업 파일  
-- **.apwz**: Aspen Plus 압축 프로젝트 파일
+### 일반적인 오류와 해결 방법
 
-## 기여하기
+1. **Aspen Plus 연결 오류**
+   - Aspen Plus가 실행 중인지 확인
+   - Python 환경에서 Aspen Plus 연결이 설정되어 있는지 확인
 
-이 프로젝트에 기여하고 싶으시다면:
+2. **파일을 찾을 수 없음**
+   - 파일 경로가 올바른지 확인
+   - 파일이 존재하는지 확인
 
-1. 이 저장소를 포크하세요
-2. 새로운 기능 브랜치를 만드세요 (`git checkout -b feature/AmazingFeature`)
-3. 변경사항을 커밋하세요 (`git commit -m 'Add some AmazingFeature'`)
-4. 브랜치에 푸시하세요 (`git push origin feature/AmazingFeature`)
-5. Pull Request를 생성하세요
+3. **장비 분류 오류**
+   - 장비 이름이 표준 패턴을 따르는지 확인
+   - TEA_machine.py의 분류 로직을 확인
 
 ## 라이선스
 
-이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 `LICENSE` 파일을 참조하세요.
+이 프로젝트는 MIT 라이선스 하에 배포됩니다.
+
+## 기여
+
+버그 리포트, 기능 요청, 코드 기여를 환영합니다. 이슈를 등록하거나 풀 리퀘스트를 보내주세요.
 
 ## 연락처
 
-프로젝트에 대한 질문이나 제안사항이 있으시면 [이슈](https://github.com/phygon975/API_project/issues)를 생성해주세요.
+문의사항이나 지원이 필요한 경우 [이슈](https://github.com/phygon975/API_project/issues)를 등록해주세요.
 # 열교환기 모듈
 from HeatExchanger import heatexchanger
 total_cost, individual_costs, heat_duties, areas = heatexchanger(

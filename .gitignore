@@ -99,7 +99,7 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
-# Aspen Plus files
+# Aspen Plus files (특정 파일만 허용)
 *.bkp
 *.apw
 *.apwz
@@ -150,3 +150,29 @@ auto_generated_config.py
 # Test files
 test_*.py
 *_test.py
+
+# 기타 파일들 (깃허브에 올리지 않을 파일들)
+commonshellsettings.xml
+heat_exchanger_module.py
+simple_test.py
+example_aspen_loader_usage.py
+example_block_detector_usage.py
+README_block_detector.md
+demo_record_type_detection.py
+demo_smart_detection.py
+README_RecordTypeDetection.md
+README_SmartDetection.md
+CITATION.cff
+test_smart_detector.py
+Block_display.bkp
+CumenePlant4.bkp
+0509.W45.40.done.apwz
+MIX_HEFA_20250716_after_HI_v1.apw
+MIX_HEFA_20250716_after_HI_v1.apwz
+_*.def
+
+# 허용할 파일들 (이 파일들만 깃허브에 올라감)
+!TEA_machine.py
+!MIX_HEFA_20250716_after_HI_v1.bkp
+!README.md
+!.gitignore
