@@ -194,7 +194,7 @@ def classify_blocks_from_bkp(file_path, block_names):
         'pumps and compressors': [],
         'vessels': [],
         'vacuum_systems': [],
-        'evaporators': [],
+        'Ignore': [],
         'other_blocks': []
     }
     
@@ -207,10 +207,10 @@ def classify_blocks_from_bkp(file_path, block_names):
             block_categories['reactors'].append(block_name)
         elif category in ['Pump', 'Compr', 'MCompr']:
             block_categories['pumps and compressors'].append(block_name)
-        elif category in ['Vacuum', 'Flash', 'Sep', 'Mixer', 'FSplit', 'Valve', 'Utility']:
+        elif category in ['Vacuum', 'Flash', 'Sep']:
             block_categories['vessels'].append(block_name)
-        elif category in ['EVAP1', 'EVAP2', 'EVAP3']:
-            block_categories['evaporators'].append(block_name)
+        elif category in ['Mixer', 'FSplit', 'Valve']:
+            block_categories['Ignore'].append(block_name)
         else:
             block_categories['other_blocks'].append(block_name)
     
