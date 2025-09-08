@@ -1,0 +1,178 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Aspen Plus files (특정 파일만 허용)
+*.bkp
+*.apw
+*.apwz
+*.def
+*.appdf
+*.for
+*.backup
+*.lck
+*.izp
+*.szp
+
+# Aspen Plus project folders
+*Cost/
+*_PD/
+*_AI/
+*_Hist/
+*_Logs/
+*_ModelRun/
+*_OffLine/
+*_OnLine/
+*_RawData/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Results files
+equipment_cost_results.json
+auto_generated_config.py
+
+# Test files
+test_*.py
+*_test.py
+
+# 기타 파일들 (깃허브에 올리지 않을 파일들)
+commonshellsettings.xml
+heat_exchanger_module.py
+simple_test.py
+example_aspen_loader_usage.py
+example_block_detector_usage.py
+README_block_detector.md
+demo_record_type_detection.py
+demo_smart_detection.py
+README_RecordTypeDetection.md
+README_SmartDetection.md
+CITATION.cff
+test_smart_detector.py
+Block_display.bkp
+CumenePlant4.bkp
+0509.W45.40.done.apwz
+MIX_HEFA_20250716_after_HI_v1.apw
+MIX_HEFA_20250716_after_HI_v1.apwz
+_*.def
+
+# 허용할 파일들 (이 파일들만 깃허브에 올라감)
+!TEA_machine.py
+!MIX_HEFA_20250716_after_HI_v1.bkp
+!README.md
+!.gitignore

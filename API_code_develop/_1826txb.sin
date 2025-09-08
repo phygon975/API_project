@@ -1,0 +1,514 @@
+ >>ORIGINAL RUN                           SEPTEMBER 8, 2025   
+   3:19:13 P.M.                           MONDAY      
+   INPUT FILE: _1826txb.inm
+   RUN ID : _1826txb
+          1    ;
+          2    ;Input file created by Aspen Plus Rel. 41.0 at 15:19:12 Mon Sep 8, 2025
+          3    ;Directory C:\Users\zkjxc\Documents\API_project\API_code_develop  Runid CUMENEPLANT4
+          4    ;
+          5
+          6
+          7    DYNAMICS
+          8        DYNAMICS RESULTS=ON
+          9
+         10    TITLE 'CUMENE PRODUCTION FROM BENZENE ALKYLATION'
+         11
+         12    IN-UNITS MET ENTHALPY='J/kg' ENTROPY='kJ/kmol-K' FLOW='kg/sec'  &
+         13            MASS-FLOW='kg/sec' MOLE-FLOW='kmol/sec'  &
+         14            VOLUME-FLOW='cum/sec' ENTHALPY-FLO=kW  &
+         15            MOLE-HEAT-CA='kJ/kmol-K' HEAT-TRANS-C='kW/sqm-K'  &
+         16            PRESSURE=kPa TEMPERATURE=K VOLUME=cum DELTA-T=K  &
+         17            HEAD=meter MOLE-DENSITY='kmol/cum' MASS-DENSITY='kg/cum'  &
+         18            MOLE-ENTHALP='kJ/mol' MASS-ENTHALP='kJ/kg'  &
+         19            MOLE-ENTROPY='kJ/mol-K' MASS-ENTROPY='kJ/kg-K'  &
+         20            MASS-HEAT-CA='kJ/kg-K' UA='kJ/sec-K' HEAT=kJ  &
+         21            MOLE-CONC='mol/l' PDROP-PER-HT='mbar/m' PDROP=kPa  &
+         22            VOL-HEAT-CAP='kJ/cum-K' HEAT-FLUX='J/sec-m'  &
+         23            VOL-ENTHALPY='kJ/cum'
+         24
+         25    DEF-STREAMS CONVEN ALL
+         26
+         27    SIM-OPTIONS MASS-BAL-CHE=YES PARADIGM=SM CARBON-FEE=.0500000000  &
+         28            FLASH-TOLFAC=1.0
+         29
+         30    MODEL-OPTION
+         31
+         32    DATABANKS 'APV150 PURE28' / 'APV150 SOLIDS' / 'APV150 AQUEOUS' &
+         33             / 'APV150 INORGANIC' / NOASPENPCD
+         34
+         35    PROP-SOURCES 'APV150 PURE28' / 'APV150 SOLIDS' /  &
+         36            'APV150 AQUEOUS' / 'APV150 INORGANIC'
+         37
+         38    COMPONENTS
+         39        BENZENE C6H6 /
+         40        PROPYLEN C3H6-2 /
+         41        CUMENE C9H12-2 /
+         42        P-DII-01 C12H18-D2 /
+         43        PROPANE C3H8 /
+         44        WATER H2O
+         45
+         46    FORMULA PROPYLEN C3H6-2 / CUMENE C9H12-2
+         47
+         48    SOLVE
+         49        RUN-MODE MODE=SIM
+         50
+         51    FLOWSHEET
+         52        BLOCK RT1 IN=HOTFEED BFW OUT=REAC-OUT STM
+         53        BLOCK E03 IN=WARMFEED OUT=HOTFEED
+         54        BLOCK M-1 IN=4 13 OUT=COLDFEED
+         55        BLOCK C-1 IN=COOL-OUT OUT=FG HEAVYS
+         56        BLOCK C-2 IN=CUMFEED OUT=C6RYCLE 1 REBSTRM CNDVAP
+         57        BLOCK C-3 IN=1 OUT=CUMENE DIPB
+         58        BLOCK E05 IN=2 12 OUT=3 WARMC3
+         59        BLOCK M-2 IN=WARMC3 10 OUT=WARMFEED
+         60        BLOCK E04 IN=REAC-OUT 15 OUT=2 10
+         61        BLOCK P-3 IN=C6RYCLE OUT=4
+         62        BLOCK V1 IN=FG OUT=FGTOFUEL
+         63        BLOCK P-1 IN=PROPENE OUT=12
+         64        BLOCK P-2 IN=BENZENE OUT=13
+         65        BLOCK E01 IN=3 REBSTRM OUT=11 REBRTN
+         66        BLOCK E02 IN=HEAVYS COLDFEED OUT=14 15
+         67        BLOCK E06 IN=CNDVAP OUT=CNDLIQ
+         68        BLOCK E07 IN=14 OUT=CUMFEED
+         69        BLOCK E08 IN=11 OUT=COOL-OUT
+         70
+         71    PROPERTIES SRK FREE-WATER=STEAMNBS
+         72        PROPERTIES NRTL
+         73
+         74    PROP-REPLACE STEAMNBS STEAM-TA
+         75
+         76    ESTIMATE ALL
+         77        IN-UNITS MET VOLUME-FLOW='cum/hr' ENTHALPY-FLO='MMkcal/hr'  &
+         78            HEAT-TRANS-C='kcal/hr-sqm-K' PRESSURE='kg/sqcm'  &
+         79            TEMPERATURE=C VOLUME=cum DELTA-T=C HEAD=meter  &
+         80            MOLE-ENTHALP='kcal/mol' MASS-ENTHALP='kcal/kg' HEAT=MMkcal  &
+         81            MOLE-CONC='mol/l' PDROP-PER-HT='mbar/m' PDROP='kg/sqcm'
+         82
+         83    PROP-DATA NRTL-1
+         84        IN-UNITS MET VOLUME-FLOW='cum/hr' ENTHALPY-FLO='MMkcal/hr'  &
+         85            HEAT-TRANS-C='kcal/hr-sqm-K' PRESSURE='kg/sqcm'  &
+         86            TEMPERATURE=C VOLUME=cum DELTA-T=C HEAD=meter  &
+         87            MOLE-ENTHALP='kcal/mol' MASS-ENTHALP='kcal/kg' HEAT=MMkcal  &
+         88            MOLE-CONC='mol/l' PDROP-PER-HT='mbar/m' PDROP='kg/sqcm'
+         89        PROP-LIST NRTL
+         90        BPVAL BENZENE PROPYLEN 0.0 151.4452000 .3000000000 0.0 0.0  &
+         91            0.0 25.00000000 25.00000000
+         92        BPVAL PROPYLEN BENZENE 0.0 -3.794700000 .3000000000 0.0  &
+         93            0.0 0.0 25.00000000 25.00000000
+         94        BPVAL BENZENE CUMENE 0.0 54.48020000 .3000000000 0.0 0.0  &
+         95            0.0 81.60000000 136.4000000
+         96        BPVAL CUMENE BENZENE 0.0 -44.66900000 .3000000000 0.0 0.0  &
+         97            0.0 81.60000000 136.4000000
+         98        BPVAL BENZENE WATER 45.19050000 591.3676000 .2000000000 0.0  &
+         99            -7.562900000 0.0 .8000000000 77.00000000
+        100        BPVAL WATER BENZENE 140.0874000 -5954.307100 .2000000000  &
+        101            0.0 -20.02540000 0.0 .8000000000 77.00000000
+        102        BPVAL CUMENE WATER -1.943500000 1983.777700 .2000000000 0.0  &
+        103            0.0 0.0 0.0 50.00000000
+        104        BPVAL WATER CUMENE 24.66120000 -4480.953100 .2000000000 0.0  &
+        105            0.0 0.0 0.0 50.00000000
+        106
+        107    PROP-DATA SRKKIJ-1
+        108        IN-UNITS ENG SHORT-LENGTH=in
+        109        PROP-LIST SRKKIJ
+        110        BPVAL BENZENE PROPYLEN -6.1090275E-3 0.0 0.0 77.00000000  &
+        111            77.00000000
+        112        BPVAL PROPYLEN BENZENE -6.1090275E-3 0.0 0.0 77.00000000  &
+        113            77.00000000
+        114        BPVAL BENZENE CUMENE -7.0569667E-3 0.0 0.0 77.00000000  &
+        115            77.00000000
+        116        BPVAL CUMENE BENZENE -7.0569667E-3 0.0 0.0 77.00000000  &
+        117            77.00000000
+        118        BPVAL BENZENE P-DII-01 -.0220101312 0.0 0.0 77.00000000  &
+        119            77.00000000
+        120        BPVAL P-DII-01 BENZENE -.0220101312 0.0 0.0 77.00000000  &
+        121            77.00000000
+        122        BPVAL BENZENE PROPANE 2.64843479E-3 0.0 0.0 77.00000000  &
+        123            77.00000000
+        124        BPVAL PROPANE BENZENE 2.64843479E-3 0.0 0.0 77.00000000  &
+        125            77.00000000
+        126        BPVAL BENZENE WATER -.1384728740 0.0 0.0 77.00000000  &
+        127            77.00000000
+        128        BPVAL WATER BENZENE -.1384728740 0.0 0.0 77.00000000  &
+        129            77.00000000
+        130        BPVAL PROPYLEN CUMENE -.0295437440 0.0 0.0 77.00000000  &
+        131            77.00000000
+        132        BPVAL CUMENE PROPYLEN -.0295437440 0.0 0.0 77.00000000  &
+        133            77.00000000
+        134        BPVAL PROPYLEN P-DII-01 -.0525358407 0.0 0.0 77.00000000  &
+        135            77.00000000
+        136        BPVAL P-DII-01 PROPYLEN -.0525358407 0.0 0.0 77.00000000  &
+        137            77.00000000
+        138        BPVAL PROPYLEN PROPANE .0177038915 0.0 0.0 77.00000000  &
+        139            77.00000000
+        140        BPVAL PROPANE PROPYLEN .0177038915 0.0 0.0 77.00000000  &
+        141            77.00000000
+        142        BPVAL PROPYLEN WATER -.3047459640 0.0 0.0 77.00000000  &
+        143            77.00000000
+        144        BPVAL WATER PROPYLEN -.3047459640 0.0 0.0 77.00000000  &
+        145            77.00000000
+        146        BPVAL CUMENE P-DII-01 -3.6406228E-3 0.0 0.0 77.00000000  &
+        147            77.00000000
+        148        BPVAL P-DII-01 CUMENE -3.6406228E-3 0.0 0.0 77.00000000  &
+        149            77.00000000
+        150        BPVAL CUMENE PROPANE -.0198809057 0.0 0.0 77.00000000  &
+        151            77.00000000
+        152        BPVAL PROPANE CUMENE -.0198809057 0.0 0.0 77.00000000  &
+        153            77.00000000
+        154        BPVAL CUMENE WATER .3102292470 0.0 0.0 77.00000000  &
+        155            77.00000000
+        156        BPVAL WATER CUMENE .3102292470 0.0 0.0 77.00000000  &
+        157            77.00000000
+        158        BPVAL P-DII-01 PROPANE -.0412353881 0.0 0.0 77.00000000  &
+        159            77.00000000
+        160        BPVAL PROPANE P-DII-01 -.0412353881 0.0 0.0 77.00000000  &
+        161            77.00000000
+        162        BPVAL P-DII-01 WATER .3175110710 0.0 0.0 77.00000000  &
+        163            77.00000000
+        164        BPVAL WATER P-DII-01 .3175110710 0.0 0.0 77.00000000  &
+        165            77.00000000
+        166        BPVAL PROPANE WATER -.3435254840 0.0 0.0 77.00000000  &
+        167            77.00000000
+        168        BPVAL WATER PROPANE -.3435254840 0.0 0.0 77.00000000  &
+        169            77.00000000
+        170
+        171    STREAM 3
+        172        SUBSTREAM MIXED TEMP=529.5984470 PRES=2451.662500
+        173        MOLE-FLOW BENZENE .1572835792 / PROPYLEN 2.11088666E-4 /  &
+        174            CUMENE .0274688568 / P-DII-01 7.19603714E-5 / PROPANE  &
+        175            1.78557468E-3
+        176
+        177    STREAM BENZENE
+        178        SUBSTREAM MIXED TEMP=298.1500000 PRES=101.3249997  &
+        179            MOLE-FLOW=.0277777777
+        180        MOLE-FRAC BENZENE 1
+        181
+        182    STREAM BFW
+        183        SUBSTREAM MIXED TEMP=393.1500000 PRES=980.6650000  &
+        184            MASS-FLOW=.3253000000
+        185        MOLE-FRAC WATER 1
+        186
+        187    STREAM PROPENE
+        188        SUBSTREAM MIXED TEMP=298.1500000 PRES=1200.000000  &
+        189            MOLE-FLOW=.0292388888
+        190        MOLE-FRAC PROPYLEN 0.95 / PROPANE 0.05
+        191
+        192    STREAM WARMFEED
+        193        SUBSTREAM MIXED TEMP=478.8026450 PRES=2451.662500
+        194        MOLE-FLOW BENZENE .1848094097 / PROPYLEN .0278088797 /  &
+        195            CUMENE 1.49864620E-5 / P-DII-01 2.2438253E-12 /  &
+        196            PROPANE 1.78557468E-3
+        197
+        198    BLOCK M-1 MIXER
+        199        PARAM
+        200
+        201    BLOCK M-2 MIXER
+        202        PARAM
+        203        BLOCK-OPTION FLASH-METHOD=GIBBS
+        204
+        205    BLOCK E03 HEATER
+        206        PARAM TEMP=623.1500000 PRES=0.0 DPPARMOPT=NO
+        207        UTILITY UTILITY-ID=FUEL
+        208
+        209    BLOCK E01 HEATX
+        210        PARAM DUTY=8.74 <MW> CALC-TYPE=DESIGN PRES-COLD=0.  &
+        211            U-OPTION=PHASE F-OPTION=CONSTANT CALC-METHOD=SHORTCUT
+        212        FEEDS HOT=3 COLD=REBSTRM
+        213        OUTLETS-HOT 11
+        214        OUTLETS-COLD REBRTN
+        215        HOT-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        216        COLD-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        217        TQ-PARAM CURVE=YES
+        218
+        219    BLOCK E02 HEATX
+        220        PARAM DUTY=3.02 <MW> CALC-TYPE=DESIGN U-OPTION=PHASE  &
+        221            F-OPTION=CONSTANT CALC-METHOD=SHORTCUT
+        222        FEEDS HOT=HEAVYS COLD=COLDFEED
+        223        OUTLETS-HOT 14
+        224        OUTLETS-COLD 15
+        225        HOT-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        226        COLD-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        227        TQ-PARAM CURVE=YES
+        228
+        229    BLOCK E04 HEATX
+        230        PARAM DUTY=1.632 <MW> CALC-TYPE=DESIGN  &
+        231            MIN-TAPP=10.00000000 U-OPTION=PHASE F-OPTION=CONSTANT  &
+        232            CALC-METHOD=SHORTCUT
+        233        FEEDS HOT=REAC-OUT COLD=15
+        234        OUTLETS-HOT 2
+        235        OUTLETS-COLD 10
+        236        FLASH-SPECS 2 NPHASE=2 FREE-WATER=NO
+        237        HOT-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        238        COLD-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        239        TQ-PARAM CURVE=YES
+        240
+        241    BLOCK E05 HEATX
+        242        PARAM DUTY=0.8 <MMkcal/hr> CALC-TYPE=DESIGN  &
+        243            MIN-TAPP=10.00000000 U-OPTION=PHASE F-OPTION=CONSTANT  &
+        244            CALC-METHOD=SHORTCUT
+        245        FEEDS HOT=2 COLD=12
+        246        OUTLETS-HOT 3
+        247        OUTLETS-COLD WARMC3
+        248        FLASH-SPECS 3 NPHASE=2 FREE-WATER=NO
+        249        HOT-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        250        COLD-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        251        TQ-PARAM CURVE=YES
+        252        BLOCK-OPTION FLASH-METHOD=INSIDE-OUT
+        253
+        254    BLOCK E06 HEATX
+        255        PARAM VFRAC-HOT=0. CALC-TYPE=DESIGN PRES-HOT=175.0000000  &
+        256            U-OPTION=PHASE F-OPTION=CONSTANT CALC-METHOD=SHORTCUT
+        257        FEEDS HOT=CNDVAP
+        258        OUTLETS-HOT CNDLIQ
+        259        HOT-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        260        COLD-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        261        TQ-PARAM CURVE=YES
+        262        REFERENCE COLD-UTIL=CW
+        263
+        264    BLOCK E07 HEATX
+        265        PARAM T-HOT=90. <C> CALC-TYPE=DESIGN PRES-HOT=245.1662500  &
+        266            U-OPTION=PHASE F-OPTION=CONSTANT CALC-METHOD=SHORTCUT
+        267        FEEDS HOT=14
+        268        OUTLETS-HOT CUMFEED
+        269        HOT-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        270        COLD-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        271        TQ-PARAM CURVE=YES
+        272        REFERENCE COLD-UTIL=CW
+        273
+        274    BLOCK E08 HEATX
+        275        PARAM T-HOT=150. <C> CALC-TYPE=DESIGN  &
+        276            PRES-HOT=2000.000000 U-OPTION=PHASE F-OPTION=CONSTANT  &
+        277            CALC-METHOD=SHORTCUT
+        278        FEEDS HOT=11
+        279        OUTLETS-HOT COOL-OUT
+        280        HOT-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        281        COLD-SIDE DP-OPTION=CONSTANT DPPARMOPT=NO
+        282        TQ-PARAM CURVE=YES
+        283        REFERENCE COLD-UTIL=LPSTMGEN
+        284
+        285    BLOCK C-1 RADFRAC
+        286        PARAM NSTAGE=16 ALGORITHM=STANDARD MAXOL=25 DAMPING=NONE
+        287        PARAM2
+        288        COL-CONFIG CONDENSER=PARTIAL-V
+        289        FEEDS COOL-OUT 5
+        290        PRODUCTS FG 1 V / HEAVYS 16 L
+        291        P-SPEC 1 1200.000000 / 2 1210.000000
+        292        COL-SPECS DP-STAGE=0.0 MOLE-RR=4.12794786 MOLE-BR=0.380352759
+        293        SPEC 1 MASS-FRAC 0.001 COMPS=BENZENE STREAMS=FG  &
+        294            SPEC-DESCRIP="FGC6"
+        295        SPEC 2 MASS-FRAC 0.001 COMPS=PROPANE PROPYLEN  &
+        296            STREAMS=HEAVYS SPEC-DESCRIP="C3BTM"
+        297        VARY 1 MOLE-RR 0. 10.
+        298        VARY 2 MOLE-BR 0.1 2.
+        299        BLOCK-OPTION FLASH-METHOD=GIBBS
+        300        UTILITIES COND-UTIL=CW REB-UTIL=HPSTM
+        301
+        302    BLOCK C-2 RADFRAC
+        303        PARAM NSTAGE=20 ALGORITHM=STANDARD MAXOL=25 DAMPING=NONE
+        304        PARAM2
+        305        COL-CONFIG CONDENSER=TOTAL
+        306        FEEDS CUMFEED 6 ABOVE-STAGE
+        307        PRODUCTS C6RYCLE 1 L / 1 20 L
+        308        PSEUDO-STREA REBSTRM 19 / CNDVAP 2 PHASE=V
+        309        P-SPEC 1 175.0000000 / 2 185.0000000
+        310        COL-SPECS D:F=0.85 DP-COL=20.00000000 MOLE-RR=0.66
+        311        T-EST 1 370.2647694 / 2 374.3057220 / 3 374.6437290 /  &
+        312            4 375.1433690 / 5 376.2540040 / 6 379.0178050 / 7  &
+        313            379.2902170 / 8 379.5136550 / 9 379.7338770 / 10  &
+        314            379.9531560 / 11 380.1723670 / 12 380.3963230 / 13  &
+        315            380.6551350 / 14 381.1355940 / 15 382.9359000
+        316        L-EST 1 .1038854419 / 2 .1055459156 / 3 .1051876778 /  &
+        317            4 .1041452344 / 5 .1012889661 / 6 .3034974694 / 7  &
+        318            .3037296444 / 8 .3038937000 / 9 .3040539639 / 10  &
+        319            .3042125972 / 11 .3043642667 / 12 .3044745944 / 13  &
+        320            .3043298667 / 14 .3026689333 / 15 .2937697750
+        321        V-EST 1 0.0 / 2 .2612876267 / 3 .2629481003 / 4  &
+        322            .2625898625 / 5 .2615474192 / 6 .2586911508 / 7  &
+        323            .2757206133 / 8 .2759527869 / 9 .2761168428 / 10  &
+        324            .2762771075 / 11 .2764357397 / 12 .2765874094 / 13  &
+        325            .2766977392 / 14 .2765530100 / 15 .2748920772
+        326        UTILITIES COND-UTIL=CW REB-UTIL=HPSTM
+        327
+        328    BLOCK C-3 RADFRAC
+        329        PARAM NSTAGE=30 ALGORITHM=STANDARD MAXOL=25 DAMPING=NONE
+        330        PARAM2
+        331        COL-CONFIG CONDENSER=TOTAL
+        332        FEEDS 1 15
+        333        PRODUCTS CUMENE 1 L / DIPB 30 L
+        334        P-SPEC 1 20.00000000 / 2 21.00000000
+        335        COL-SPECS D:F=0.99 DP-STAGE=.7000000000 MOLE-RR=0.9
+        336        UTILITIES COND-UTIL=CW REB-UTIL=MPSTM
+        337
+        338    BLOCK RT1 RPLUG
+        339        PARAM TYPE=CO-COOL NTUBE=2500 LENGTH=6.000000000  &
+        340            DIAM=.0763000000 NPHASE=1 PHASE=V U=.0650000000  &
+        341            IGN-CAT-VOL=NO CAT-PRESENT=YES BED-VOIDAGE=0.5  &
+        342            CAT-RHO=2.000000000 OPT-DIA=CONSTANT
+        343        BLOCK-OPTION FREE-WATER=NO
+        344        REACTIONS RXN-IDS=R-1
+        345
+        346    BLOCK P-1 PUMP
+        347        PARAM PRES=2451.662500 EFF=0.75 DEFF=0.98 PUMP-TYPE=PUMP
+        348        UTILITY UTILITY-ID=ELEC
+        349
+        350    BLOCK P-2 PUMP
+        351        PARAM PRES=2533.125000 EFF=0.75 DEFF=0.98
+        352        PERFOR-PARAM
+        353        UTILITY UTILITY-ID=ELEC
+        354
+        355    BLOCK P-3 PUMP
+        356        PARAM PRES=2533.125000
+        357        UTILITY UTILITY-ID=ELEC
+        358
+        359    BLOCK V1 VALVE
+        360        PARAM P-OUT=117.6798000
+        361
+        362    UTILITY CW GENERAL
+        363        DESCRIPTION 'Cooling Water, Inlet Temp=20 C, Outlet Temp=25 C'
+        364        COST ENERGY-PRICE=7.9549200E-10
+        365        PARAM UTILITY-TYPE=WATER PRES=101.3250000  &
+        366            PRES-OUT=101.3250000 TIN=288.1500000 TOUT=293.1500000  &
+        367            CALOPT=FLASH MIN-TAPP=10.00000000 CALCCO2=YES  &
+        368            FACTORSOURCE="US-EPA-Rule-E9-5711" FUELSOURCE="Natural_gas"  &
+        369            CO2FACTOR=2.10386700E-7 HTC=3.750000000
+        370
+        371    UTILITY ELEC GENERAL
+        372        DESCRIPTION 'Electrical Utility'
+        373        COST ELEC-PRICE=.0775000000
+        374        PARAM UTILITY-TYPE=ELECTRICITY CALCCO2=YES FACTORSOURCE= &
+        375            "US-EPA-Rule-E9-5711" FUELSOURCE="Natural_gas"  &
+        376            CO2FACTOR=2.10386700E-7 EFFICIENCY=0.58
+        377
+        378    UTILITY FUEL GENERAL
+        379        DESCRIPTION  &
+        380            'Fired Heater, Inlet Temp=1000 C, Outlet Temp=400 C'
+        381        COST ENERGY-PRICE=3.17465658E-8
+        382        PARAM UTILITY-TYPE=GENERAL COOLING-VALU=50000.00000  &
+        383            TIN=1273.150000 TOUT=673.1500000 MIN-TAPP=25.00000000  &
+        384            CALCCO2=YES FACTORSOURCE="US-EPA-Rule-E9-5711" FUELSOURCE= &
+        385            "Natural_gas" CO2FACTOR=2.10386700E-7 EFFICIENCY=0.85  &
+        386            HTC=.1110000000
+        387
+        388    UTILITY HPSTM GENERAL
+        389        DESCRIPTION  &
+        390            'Medium Pressure Steam, Inlet Temp=175 C, Outlet Temp=174 C, Pres=127 psia'
+        391        COST PRICE=.0120000000
+        392        PARAM UTILITY-TYPE=STEAM PRES=3432.327500 TIN=543.1500000  &
+        393            TOUT=542.1500000 VFR-OUT=0. CALOPT=FLASH  &
+        394            MIN-TAPP=10.00000000 CALCCO2=YES FACTORSOURCE= &
+        395            "US-EPA-Rule-E9-5711" FUELSOURCE="Natural_gas"  &
+        396            CO2FACTOR=2.10386700E-7 EFFICIENCY=0.85 HTC=6.000000000
+        397
+        398    UTILITY LPSTMGEN GENERAL
+        399        DESCRIPTION  &
+        400            'Low Pressure Steam Generation, Inlet Temp=124 C, Outlet Temp=125 C'
+        401        COST PRICE=-.0100000000
+        402        PARAM UTILITY-TYPE=STEAM TIN=397.1500000 TOUT=398.1500000  &
+        403            VFRAC=0. VFR-OUT=1. CALOPT=FLASH MIN-TAPP=10.00000000  &
+        404            CALCCO2=YES FACTORSOURCE="US-EPA-Rule-E9-5711" FUELSOURCE= &
+        405            "Natural_gas" CO2FACTOR=2.10386700E-7 EFFICIENCY=-0.85  &
+        406            HTC=6.000000000
+        407
+        408    UTILITY MPSTM GENERAL
+        409        DESCRIPTION  &
+        410            'Medium Pressure Steam, Inlet Temp=175 C, Outlet Temp=174 C, Pres=127 psia'
+        411        COST PRICE=.0110000000
+        412        PARAM UTILITY-TYPE=STEAM TIN=448.1500000 TOUT=447.1500000  &
+        413            VFRAC=1. VFR-OUT=0. CALOPT=FLASH MIN-TAPP=10.00000000  &
+        414            CALCCO2=YES FACTORSOURCE="US-EPA-Rule-E9-5711" FUELSOURCE= &
+        415            "Natural_gas" CO2FACTOR=2.10386700E-7 EFFICIENCY=0.85  &
+        416            HTC=6.000000000
+        417
+        418    DESIGN-SPEC DS-1
+        419        DEFINE OUTTEMP STREAM-VAR STREAM=REAC-OUT SUBSTREAM=MIXED  &
+        420            VARIABLE=TEMP UOM="C"
+        421        SPEC "OUTTEMP" TO "400"
+        422        TOL-SPEC "1.0e-2"
+        423        VARY STREAM-VAR STREAM=BFW SUBSTREAM=MIXED  &
+        424            VARIABLE=MASS-FLOW UOM="kg/hr"
+        425        LIMITS "0" "5000"
+        426
+        427    EO-CONV-OPTI
+        428
+        429    CALCULATOR F-1
+        430        DEFINE FLOW STREAM-VAR STREAM=REAC-OUT SUBSTREAM=MIXED  &
+        431            VARIABLE=MASS-FLOW UOM="lb/hr"
+        432        DEFINE DENS STREAM-VAR STREAM=REAC-OUT SUBSTREAM=MIXED  &
+        433            VARIABLE=MASS-DENSITY UOM="lb/cuft"
+        434    F        VFLOW=FLOW/DENS
+        435    F        DP=-1E-9*VFLOW**2
+        436    C        WRITE(NTERM,50) FLOW, DENS, VFLOW, DP
+        437    F 50     FORMAT('   FLOW=',F7.1,'    DENS=',F7.4,
+        438    F    1        '    VFLOW=',F7.1,'    DP=',F7.3)
+        439        READ-VARS FLOW DENS
+        440
+        441    SENSITIVITY S-1
+        442        DEFINE CUMENE MOLE-FRAC STREAM=CUMENE SUBSTREAM=MIXED  &
+        443            COMPONENT=CUMENE
+        444        TABULATE 1 "CUMENE"
+        445        VARY MOLE-FLOW STREAM=PROPENE SUBSTREAM=MIXED  &
+        446            COMPONENT=PROPANE UOM="kmol/hr"
+        447        RANGE OPT-LIST=RANGE LOWER="0" UPPER="10" INCR="1.111111"
+        448
+        449    SENSITIVITY S-2
+        450        DEFINE CONV MOLE-FLOW STREAM=REAC-OUT SUBSTREAM=MIXED  &
+        451            COMPONENT=CUMENE UOM="kmol/hr"
+        452        TABULATE 1 "CONV"
+        453        VARY BLOCK-VAR BLOCK=RT1 VARIABLE=NTUBE SENTENCE=PARAM
+        454        RANGE OPT-LIST=RANGE LOWER="500" UPPER="1000" INCR="100"
+        455
+        456    CONV-OPTIONS
+        457        PARAM TEAR-METHOD=BROYDEN TOL=0.0001
+        458        WEGSTEIN MAXIT=100
+        459        BROYDEN MAXIT=100
+        460
+        461    STREAM-REPOR MOLEFLOW MOLEFRAC MASSFRAC
+        462
+        463    PROPERTY-REP PCES NOPROP-DATA NODFMS
+        464
+        465    REACTIONS R-1 GENERAL
+        466        REAC-DATA 1 NAME=MAIN PHASE=V RATE-UNITV="KMOL/CUM-S"
+        467        REAC-DATA 2 NAME=SIDE PHASE=V RATE-UNITV="KMOL/CUM-S"
+        468        RATE-CON 1 PRE-EXP=28000000. ACT-ENERGY=104.1740000
+        469        RATE-CON 2 PRE-EXP=2320000000. ACT-ENERGY=146.7420000
+        470        STOIC 1 MIXED BENZENE -1. / PROPYLEN -1. / CUMENE 1.
+        471        STOIC 2 MIXED CUMENE -1. / PROPYLEN -1. / P-DII-01 1.
+        472        DFORCE-EXP 1 MIXED BENZENE 1. / MIXED PROPYLEN 1. /  &
+        473            MIXED CUMENE 0.
+        474        DFORCE-EXP 2 MIXED CUMENE 1. / MIXED PROPYLEN 1. /  &
+        475            MIXED P-DII-01 0.
+        476
+        477    PROP-TABLE PURE-1 PROPS
+        478        IN-UNITS MET ENTHALPY='J/kg' ENTROPY='kJ/kmol-K'  &
+        479            FLOW='kg/sec' MASS-FLOW='kg/sec' MOLE-FLOW='kmol/sec'  &
+        480            VOLUME-FLOW='cum/sec' ENTHALPY-FLO=kW  &
+        481            MOLE-HEAT-CA='kJ/kmol-K' HEAT-TRANS-C='kW/sqm-K'  &
+        482            PRESSURE='kg/sqcm' TEMPERATURE=C VOLUME=cum DELTA-T=K  &
+        483            HEAD=meter MOLE-DENSITY='kmol/cum' MASS-DENSITY='kg/cum'  &
+        484            MOLE-ENTHALP='kJ/mol' MASS-ENTHALP='kJ/kg'  &
+        485            MOLE-ENTROPY='kJ/mol-K' MASS-ENTROPY='kJ/kg-K'  &
+        486            MASS-HEAT-CA='kJ/kg-K' UA='kJ/sec-K' HEAT=kJ  &
+        487            MOLE-CONC='mol/l' PDROP-PER-HT='mbar/m' PDROP=kPa  &
+        488            VOL-HEAT-CAP='kJ/cum-K' HEAT-FLUX='J/sec-m'  &
+        489            VOL-ENTHALPY='kJ/cum'
+        490        ANALYSIS ANAL-TYPE=PURE PURE-PROP='FUG' PURE-PHASES= V
+        491        MOLE-FLOW BENZENE 1
+        492        PROPERTIES SRK FREE-WATER=STEAMNBS SOLU-WATER=3  &
+        493            TRUE-COMPS=YES
+        494        VARY TEMP
+        495        RANGE VARVALUE=RANGE LOWER=0 UPPER=100.0000000 NPOINT=50
+        496        VARY PRES
+        497        RANGE LIST=1.033227453
+        498        PARAM
+        499
+        500    DISABLE
+        501        SENSITIVITY S-1 S-2
+        502        CALCULATOR F-1
+        503    ;
+        504    ;
+        505    ;
+        506    ;
+        507    ;
+
+   SIMULATION STARTED     MODULE USED: apmain  
+   LOCATED IN:C:\Program Files\AspenTech\Aspen Plus V15.0\Engine\\xeq
