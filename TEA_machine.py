@@ -11,6 +11,17 @@ import sys
 import time
 from threading import Thread
 from typing import Optional
+from equipment_costs import (
+    register_default_correlations,
+    CEPCIOptions,
+    calculate_pressure_device_costs_auto,
+    preview_pressure_devices_auto,
+    print_preview_results,
+    calculate_pressure_device_costs_with_data,
+    clear_aspen_cache,
+    get_cache_stats,
+    _get_unit_type_value,
+)
 
 #======================================================================
 # Spinner
@@ -53,7 +64,7 @@ class Spinner:
 #======================================================================
 # Aspen Plus Connection
 #======================================================================
-file = 'MIX_HEFA_20250716_after_HI_v1.bkp'  #아스펜 파일이 바뀔 시 여기를 수정해야 함
+file = 'Equipment_cost_estimation_aspen.bkp'  #아스펜 파일이 바뀔 시 여기를 수정해야 함
 
     # 2. Get absolute path to Aspen Plus file
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -158,7 +169,7 @@ def parse_bkp_file_for_blocks(file_path, block_names):
                         elif next_line in ['RStoic', 'RCSTR', 'RPlug', 'RBatch', 'REquil', 'RYield']:
                             category = next_line
                             break
-                        elif next_line in ['Pump', 'Compr', 'MCompr', 'Vacuum', 'Flash', 'Sep', 'Mixer', 'FSplit', 'Valve', 'Utility']:
+                        elif next_line in ['Pump', 'Compr', 'MCompr', 'Vacuum', 'Flash', 'Sep', 'Mixer', 'FSplit', 'Valve']:
                             category = next_line
                             break
                         elif next_line in ['EVAP1', 'EVAP2', 'EVAP3']:
@@ -334,10 +345,7 @@ def get_units_sets(Application):
         # Units-Sets 노드 찾기
         units_sets_node = Application.Tree.FindNode("\\Data\\Setup\\Units-Sets")
         if units_sets_node is None:
-            print("Warning: Units-Sets node not found")
             return units_sets
-        
-        print("Found Units-Sets node, collecting unit sets...")
         
         # Units-Sets 하위의 직접적인 자식들 수집
         if hasattr(units_sets_node, 'Elements') and units_sets_node.Elements is not None:
@@ -350,12 +358,46 @@ def get_units_sets(Application):
                     # 예외 발생 시 조용히 건너뛰기
                     pass
         
-        print(f"Found {len(units_sets)} unit sets")
-        
     except Exception as e:
-        print(f"Error collecting unit sets: {str(e)}")
+        # 조용히 실패
+        pass
     
     return units_sets
+
+def get_current_unit_set(Application):
+    """
+    현재 사용 중인 Unit Set을 가져오는 함수
+    
+    Parameters:
+    -----------
+    Application : Aspen Plus COM object
+        Aspen Plus 애플리케이션 객체
+    
+    Returns:
+    --------
+    str or None : 현재 사용 중인 Unit Set 이름
+    """
+    try:
+        # OUTSET 노드에서 현재 사용 중인 Unit Set 가져오기
+        outset_node = Application.Tree.FindNode("\\Data\\Setup\\Global\\Input\\OUTSET")
+        
+        if outset_node is None:
+            print("Warning: OUTSET node not found")
+            return None
+        
+        current_unit_set = outset_node.Value
+        
+        if current_unit_set:
+            print(f"Current unit set: {current_unit_set}")
+            return current_unit_set
+        else:
+            print("Warning: No current unit set found")
+            return None
+            
+    except Exception as e:
+        print(f"Error getting current unit set: {str(e)}")
+        return None
+
 
 # 사용하지 않는 함수 제거됨
 
@@ -563,6 +605,564 @@ def get_hardcoded_unit_table():
     return unit_table
 
 #======================================================================
+# SI Unit Conversion System
+#======================================================================
+
+def get_si_base_units():
+    """
+    각 물리량별 SI 기준 단위를 정의하는 함수
+    """
+    si_base_units = {
+        'AREA': 'sqm',           # 제곱미터
+        'COMPOSITION': 'mol-fr', # 몰분율 (무차원)
+        'DENSITY': 'kg/cum',     # kg/m³
+        'ENERGY': 'J',           # 줄
+        'FLOW': 'kg/sec',        # kg/s
+        'MASS-FLOW': 'kg/sec',   # kg/s
+        'MOLE-FLOW': 'kmol/sec', # kmol/s
+        'VOLUME-FLOW': 'cum/sec', # m³/s
+        'MASS': 'kg',            # 킬로그램
+        'POWER': 'Watt',         # 와트
+        'PRESSURE': 'N/sqm',     # 파스칼 (N/m²)
+        'TEMPERATURE': 'K',      # 켈빈
+        'TIME': 'sec',           # 초
+        'VELOCITY': 'm/sec',     # m/s
+        'VOLUME': 'cum',         # m³
+        'MOLE-DENSITY': 'kmol/cum', # kmol/m³
+        'MASS-DENSITY': 'kg/cum',   # kg/m³
+        'MOLE-VOLUME': 'cum/kmol',  # m³/kmol
+        'ELEC-POWER': 'Watt',    # 와트
+        'UA': 'J/sec-K',         # J/(s·K)
+        'WORK': 'J',             # 줄
+        'HEAT': 'J'              # 줄
+    }
+    return si_base_units
+
+def get_unit_conversion_factors():
+    """
+    각 단위를 SI 기준 단위로 환산하는 계수를 정의하는 함수
+    """
+    conversion_factors = {
+        # AREA (sqm 기준)
+        'sqm': 1.0,
+        'sqft': 0.092903,        # 1 sqft = 0.092903 sqm
+        'sqcm': 0.0001,          # 1 sqcm = 0.0001 sqm
+        'sqin': 0.00064516,      # 1 sqin = 0.00064516 sqm
+        'sqmile': 2589988.11,    # 1 sqmile = 2,589,988.11 sqm
+        'sqmm': 0.000001,        # 1 sqmm = 0.000001 sqm
+        
+        # MASS (kg 기준)
+        'kg': 1.0,
+        'lb': 0.453592,          # 1 lb = 0.453592 kg
+        'gm': 0.001,             # 1 gm = 0.001 kg
+        'ton': 1000.0,           # 1 ton = 1000 kg
+        'Mlb': 453592.0,         # 1 Mlb = 453,592 kg
+        'tonne': 1000.0,         # 1 tonne = 1000 kg
+        'L-ton': 1016.05,        # 1 L-ton = 1016.05 kg
+        'MMlb': 453592000.0,     # 1 MMlb = 453,592,000 kg
+        
+        # TIME (sec 기준)
+        'sec': 1.0,
+        'hr': 3600.0,            # 1 hr = 3600 sec
+        'day': 86400.0,          # 1 day = 86400 sec
+        'min': 60.0,             # 1 min = 60 sec
+        'year': 31536000.0,      # 1 year = 31,536,000 sec
+        'month': 2628000.0,      # 1 month = 2,628,000 sec
+        'week': 604800.0,        # 1 week = 604,800 sec
+        'nsec': 1e-9,            # 1 nsec = 1e-9 sec
+        'oper-year': 28382400.0, # 1 oper-year = 28,382,400 sec (0.9 * 365 * 24 * 3600)
+        
+        # TEMPERATURE (K 기준) - 특별 처리 필요
+        'K': 1.0,                # 기준 단위
+        'C': 'C_to_K',           # 섭씨는 특별 변환 필요
+        'F': 'F_to_K',           # 화씨는 특별 변환 필요
+        'R': 0.555556,           # 1 R = 5/9 K
+        
+        # PRESSURE (N/sqm = Pa 기준)
+        'N/sqm': 1.0,            # 파스칼
+        'PsIa': 6894.76,         # 1 psia = 6894.76 Pa
+        'atm': 101325.0,         # 1 atm = 101,325 Pa
+        'lbf/sqft': 47.8803,     # 1 lbf/sqft = 47.8803 Pa
+        'bar': 100000.0,         # 1 bar = 100,000 Pa
+        'torr': 133.322,         # 1 torr = 133.322 Pa
+        'in-water': 249.089,     # 1 in-water = 249.089 Pa
+        'kg/sqcm': 98066.5,      # 1 kg/sqcm = 98,066.5 Pa
+        'mmHg': 133.322,         # 1 mmHg = 133.322 Pa
+        'kPa': 1000.0,           # 1 kPa = 1000 Pa
+        'mm-water': 9.80665,     # 1 mm-water = 9.80665 Pa
+        'mbar': 100.0,           # 1 mbar = 100 Pa
+        'psig': 'psig_to_Pa',    # psig는 특별 변환 필요
+        'atmg': 'atmg_to_Pa',    # atmg는 특별 변환 필요
+        'barg': 'barg_to_Pa',    # barg는 특별 변환 필요
+        'pa': 1.0,               # 파스칼 (소문자)
+        'MiPa': 1000000.0,       # 1 MPa = 1,000,000 Pa
+        'Pag': 'Pag_to_Pa',      # Pag는 특별 변환 필요
+        'kPag': 'kPag_to_Pa',    # kPag는 특별 변환 필요
+        'MPag': 'MPag_to_Pa',    # MPag는 특별 변환 필요
+        'mbarg': 'mbarg_to_Pa',  # mbarg는 특별 변환 필요
+        'psi': 6894.76,          # 1 psi = 6894.76 Pa
+        'bara': 100000.0,        # 1 bara = 100,000 Pa
+        
+        # ENERGY (J 기준)
+        'J': 1.0,
+        'Btu': 1055.06,          # 1 Btu = 1055.06 J
+        'cal': 4.184,            # 1 cal = 4.184 J
+        'kcal': 4184.0,          # 1 kcal = 4184 J
+        'kWhr': 3600000.0,       # 1 kWhr = 3,600,000 J
+        'ft-lbf': 1.35582,       # 1 ft-lbf = 1.35582 J
+        'GJ': 1000000000.0,      # 1 GJ = 1,000,000,000 J
+        'kJ': 1000.0,            # 1 kJ = 1000 J
+        'N-m': 1.0,              # 1 N-m = 1 J
+        'MJ': 1000000.0,         # 1 MJ = 1,000,000 J
+        'Mcal': 4184000.0,       # 1 Mcal = 4,184,000 J
+        'Gcal': 4184000000.0,    # 1 Gcal = 4,184,000,000 J
+        'Mbtu': 1055060000.0,    # 1 Mbtu = 1,055,060,000 J
+        'MMBtu': 1055060000000.0, # 1 MMBtu = 1,055,060,000,000 J
+        'hp-hr': 2684520.0,      # 1 hp-hr = 2,684,520 J
+        'MMkcal': 4184000000000.0, # 1 MMkcal = 4,184,000,000,000 J
+        'Mmkcal': 4184000000000000.0, # 1 Mmkcal = 4,184,000,000,000,000 J
+        'Pcu': 1055.06,          # 1 Pcu = 1055.06 J
+        'MMPcu': 1055060000000.0, # 1 MMPcu = 1,055,060,000,000 J
+        'kW-hr': 3600000.0,      # 1 kW-hr = 3,600,000 J
+        
+        # POWER (Watt 기준)
+        'Watt': 1.0,
+        'hp': 745.7,             # 1 hp = 745.7 W
+        'kW': 1000.0,            # 1 kW = 1000 W
+        'Btu/hr': 0.293071,      # 1 Btu/hr = 0.293071 W
+        'cal/sec': 4.184,        # 1 cal/sec = 4.184 W
+        'ft-lbf/sec': 1.35582,   # 1 ft-lbf/sec = 1.35582 W
+        'MIW': 1000000.0,        # 1 MW = 1,000,000 W
+        'GW': 1000000000.0,      # 1 GW = 1,000,000,000 W
+        'MJ/hr': 277.778,        # 1 MJ/hr = 277.778 W
+        'kcal/hr': 1.16222,      # 1 kcal/hr = 1.16222 W
+        'Gcal/hr': 1162220.0,    # 1 Gcal/hr = 1,162,220 W
+        'MMBtu/hr': 293071.0,    # 1 MMBtu/hr = 293,071 W
+        'MBtu/hr': 293.071,      # 1 MBtu/hr = 293.071 W
+        'Mhp': 745700000.0,      # 1 Mhp = 745,700,000 W
+        
+        # FLOW (kg/sec 기준)
+        'kg/sec': 1.0,
+        'lb/hr': 0.000125998,    # 1 lb/hr = 0.000125998 kg/sec
+        'kg/hr': 0.000277778,    # 1 kg/hr = 0.000277778 kg/sec
+        'lb/sec': 0.453592,      # 1 lb/sec = 0.453592 kg/sec
+        'Mlb/hr': 125.998,       # 1 Mlb/hr = 125.998 kg/sec
+        'tons/day': 0.0115741,   # 1 tons/day = 0.0115741 kg/sec
+        'Mcfh': 0.00786579,      # 1 Mcfh = 0.00786579 kg/sec (가정: 공기 밀도)
+        'tonne/hr': 0.277778,    # 1 tonne/hr = 0.277778 kg/sec
+        'lb/day': 5.24991e-06,   # 1 lb/day = 5.24991e-06 kg/sec
+        'kg/day': 1.15741e-05,   # 1 kg/day = 1.15741e-05 kg/sec
+        'tons/hr': 0.277778,     # 1 tons/hr = 0.277778 kg/sec
+        'kg/min': 0.0166667,     # 1 kg/min = 0.0166667 kg/sec
+        'kg/year': 3.17098e-08,  # 1 kg/year = 3.17098e-08 kg/sec
+        'gm/min': 1.66667e-05,   # 1 gm/min = 1.66667e-05 kg/sec
+        'gm/hr': 2.77778e-07,    # 1 gm/hr = 2.77778e-07 kg/sec
+        'gm/day': 1.15741e-08,   # 1 gm/day = 1.15741e-08 kg/sec
+        'Mgm/hr': 0.277778,      # 1 Mgm/hr = 0.277778 kg/sec
+        'Ggm/hr': 277.778,       # 1 Ggm/hr = 277.778 kg/sec
+        'Mgm/day': 0.0115741,    # 1 Mgm/day = 0.0115741 kg/sec
+        'Ggm/day': 11.5741,      # 1 Ggm/day = 11.5741 kg/sec
+        'lb/min': 0.00755987,    # 1 lb/min = 0.00755987 kg/sec
+        'MMlb/hr': 125998.0,     # 1 MMlb/hr = 125,998 kg/sec
+        'Mlb/day': 5.24991,      # 1 Mlb/day = 5.24991 kg/sec
+        'MMlb/day': 5249.91,     # 1 MMlb/day = 5,249.91 kg/sec
+        'lb/year': 1.43833e-08,  # 1 lb/year = 1.43833e-08 kg/sec
+        'Mlb/year': 1.43833e-05, # 1 Mlb/year = 1.43833e-05 kg/sec
+        'MMIb/year': 0.0143833,  # 1 MMIb/year = 0.0143833 kg/sec
+        'tons/min': 16.6667,     # 1 tons/min = 16.6667 kg/sec
+        'Mtons/year': 31.7098,   # 1 Mtons/year = 31.7098 kg/sec
+        'MMtons/year': 31709.8,  # 1 MMtons/year = 31,709.8 kg/sec
+        'L-tons/min': 16.9333,   # 1 L-tons/min = 16.9333 kg/sec
+        'L-tons/hr': 0.282222,   # 1 L-tons/hr = 0.282222 kg/sec
+        'L-tons/day': 0.0117593, # 1 L-tons/day = 0.0117593 kg/sec
+        'ML-tons/year': 32.1507, # 1 ML-tons/year = 32.1507 kg/sec
+        'MML-tons/year': 32150.7, # 1 MML-tons/year = 32,150.7 kg/sec
+        'ktonne/year': 0.0317098, # 1 ktonne/year = 0.0317098 kg/sec
+        'kg/oper-year': 3.52775e-08, # 1 kg/oper-year = 3.52775e-08 kg/sec
+        'lb/oper-year': 1.59891e-08, # 1 lb/oper-year = 1.59891e-08 kg/sec
+        'Mlb/oper-year': 1.59891e-05, # 1 Mlb/oper-year = 1.59891e-05 kg/sec
+        'MIMIb/oper-year': 0.0159891, # 1 MIMIb/oper-year = 0.0159891 kg/sec
+        'Mtons/oper-year': 35.2775,   # 1 Mtons/oper-year = 35.2775 kg/sec
+        'MMtons/oper-year': 35277.5,  # 1 MMtons/oper-year = 35,277.5 kg/sec
+        'ML-tons/oper-year': 35.7230, # 1 ML-tons/oper-year = 35.7230 kg/sec
+        'MML-tons/oper-year': 35723.0, # 1 MML-tons/oper-year = 35,723.0 kg/sec
+        'ktonne/oper-year': 0.0352775, # 1 ktonne/oper-year = 0.0352775 kg/sec
+        'gm/sec': 0.001,         # 1 gm/sec = 0.001 kg/sec
+        'tons/year': 0.0317098,  # 1 tons/year = 0.0317098 kg/sec
+        'tonne/day': 0.0115741,  # 1 tonne/day = 0.0115741 kg/sec
+        'tonne/year': 0.0317098, # 1 tonne/year = 0.0317098 kg/sec
+        'tons/oper-year': 0.0352775, # 1 tons/oper-year = 0.0352775 kg/sec
+        'tonne/oper-year': 0.0352775, # 1 tonne/oper-year = 0.0352775 kg/sec
+        
+        # MOLE-FLOW (kmol/sec 기준)
+        'kmol/sec': 1.0,
+        'lbmol/hr': 0.000125998, # 1 lbmol/hr = 0.000125998 kmol/sec
+        'kmol/hr': 0.000277778,  # 1 kmol/hr = 0.000277778 kmol/sec
+        'MMscfh': 0.000783986,   # 1 MMscfh = 0.000783986 kmol/sec (표준상태 가정)
+        'MMscmh': 0.000022414,   # 1 MMscmh = 0.000022414 kmol/sec (표준상태 가정)
+        'mol/sec': 0.001,        # 1 mol/sec = 0.001 kmol/sec
+        'lbmol/sec': 0.453592,   # 1 lbmol/sec = 0.453592 kmol/sec
+        'scmh': 0.000022414,     # 1 scmh = 0.000022414 kmol/sec
+        'bmol/day': 1.15741e-05, # 1 bmol/day = 1.15741e-05 kmol/sec
+        'kmol/day': 1.15741e-05, # 1 kmol/day = 1.15741e-05 kmol/sec
+        'MMscfd': 0.00000907407, # 1 MMscfd = 0.00000907407 kmol/sec
+        'Mlscfd': 0.00000907407, # 1 Mlscfd = 0.00000907407 kmol/sec
+        'scfm': 0.000000471947,  # 1 scfm = 0.000000471947 kmol/sec
+        'mol/min': 1.66667e-05,  # 1 mol/min = 1.66667e-05 kmol/sec
+        'kmol/khr': 0.000277778, # 1 kmol/khr = 0.000277778 kmol/sec
+        'kmol/Mhr': 0.277778,    # 1 kmol/Mhr = 0.277778 kmol/sec
+        'mol/hr': 2.77778e-07,   # 1 mol/hr = 2.77778e-07 kmol/sec
+        'Mmol/hr': 0.277778,     # 1 Mmol/hr = 0.277778 kmol/sec
+        'Mlbmol/hr': 0.125998,   # 1 Mlbmol/hr = 0.125998 kmol/sec
+        'lbmol/Mhr': 0.125998,   # 1 lbmol/Mhr = 0.125998 kmol/sec
+        'lbmol/MMhr': 125.998,   # 1 lbmol/MMhr = 125.998 kmol/sec
+        'Mscfm': 0.000471947,    # 1 Mscfm = 0.000471947 kmol/sec
+        'scfh': 7.86579e-08,     # 1 scfh = 7.86579e-08 kmol/sec
+        'scfd': 3.27741e-09,     # 1 scfd = 3.27741e-09 kmol/sec
+        'ncmh': 0.000022414,     # 1 ncmh = 0.000022414 kmol/sec
+        'ncmd': 9.33917e-07,     # 1 ncmd = 9.33917e-07 kmol/sec
+        'ACFM': 0.000000471947,  # 1 ACFM = 0.000000471947 kmol/sec
+        'kmol/min': 0.0166667,   # 1 kmol/min = 0.0166667 kmol/sec
+        'kmol/week': 1.65344e-06, # 1 kmol/week = 1.65344e-06 kmol/sec
+        'kmol/month': 3.80517e-07, # 1 kmol/month = 3.80517e-07 kmol/sec
+        'kmol/year': 3.17098e-08, # 1 kmol/year = 3.17098e-08 kmol/sec
+        'kmol/oper-year': 3.52775e-08, # 1 kmol/oper-year = 3.52775e-08 kmol/sec
+        'lbmol/min': 0.00755987, # 1 lbmol/min = 0.00755987 kmol/sec
+        
+        # VOLUME-FLOW (cum/sec 기준)
+        'cum/sec': 1.0,
+        'cuft/hr': 7.86579e-06,  # 1 cuft/hr = 7.86579e-06 m³/sec
+        'l/min': 1.66667e-05,    # 1 l/min = 1.66667e-05 m³/sec
+        'gal/min': 6.30902e-05,  # 1 gal/min = 6.30902e-05 m³/sec
+        'gal/hr': 1.05150e-06,   # 1 gal/hr = 1.05150e-06 m³/sec
+        'bbl/day': 1.84013e-06,  # 1 bbl/day = 1.84013e-06 m³/sec
+        'cum/hr': 0.000277778,   # 1 cum/hr = 0.000277778 m³/sec
+        'cuft/min': 0.000471947, # 1 cuft/min = 0.000471947 m³/sec
+        'bbl/hr': 4.41631e-05,   # 1 bbl/hr = 4.41631e-05 m³/sec
+        'cuft/sec': 0.0283168,   # 1 cuft/sec = 0.0283168 m³/sec
+        'cum/day': 1.15741e-05,  # 1 cum/day = 1.15741e-05 m³/sec
+        'cum/year': 3.17098e-08, # 1 cum/year = 3.17098e-08 m³/sec
+        'l/hr': 2.77778e-07,     # 1 l/hr = 2.77778e-07 m³/sec
+        'kbbl/day': 0.00184013,  # 1 kbbl/day = 0.00184013 m³/sec
+        'MMcuft/hr': 7.86579,    # 1 MMcuft/hr = 7.86579 m³/sec
+        'MMcuft/day': 0.327741,  # 1 MMcuft/day = 0.327741 m³/sec
+        'Mcuft/day': 0.000327741, # 1 Mcuft/day = 0.000327741 m³/sec
+        'l/sec': 0.001,          # 1 l/sec = 0.001 m³/sec
+        'l/day': 1.15741e-08,    # 1 l/day = 1.15741e-08 m³/sec
+        'cum/min': 0.0166667,    # 1 cum/min = 0.0166667 m³/sec
+        'kcum/sec': 1000.0,      # 1 kcum/sec = 1000 m³/sec
+        'kcum/hr': 0.277778,     # 1 kcum/hr = 0.277778 m³/sec
+        'kcum/day': 0.0115741,   # 1 kcum/day = 0.0115741 m³/sec
+        'Mcum/sec': 1000000.0,   # 1 Mcum/sec = 1,000,000 m³/sec
+        'Mcum/hr': 277.778,      # 1 Mcum/hr = 277.778 m³/sec
+        'Mcum/day': 11.5741,     # 1 Mcum/day = 11.5741 m³/sec
+        'cuft/day': 3.27741e-07, # 1 cuft/day = 3.27741e-07 m³/sec
+        'Mcuft/min': 0.471947,   # 1 Mcuft/min = 0.471947 m³/sec
+        'Mcuft/hr': 0.00786579,  # 1 Mcuft/hr = 0.00786579 m³/sec
+        'MMcuft/hr': 7.86579,    # 1 MMcuft/hr = 7.86579 m³/sec
+        'Mgal/min': 63.0902,     # 1 Mgal/min = 63.0902 m³/sec
+        'MMgal/min': 63090.2,    # 1 MMgal/min = 63,090.2 m³/sec
+        'Mgal/hr': 1.05150,      # 1 Mgal/hr = 1.05150 m³/sec
+        'MMgal/hr': 1051.50,     # 1 MMgal/hr = 1,051.50 m³/sec
+        'Mbbl/hr': 44.1631,      # 1 Mbbl/hr = 44.1631 m³/sec
+        'MMbbl/hr': 44163.1,     # 1 MMbbl/hr = 44,163.1 m³/sec
+        'Mbbl/day': 1.84013,     # 1 Mbbl/day = 1.84013 m³/sec
+        'MMbbl/day': 1840.13,    # 1 MMbbl/day = 1,840.13 m³/sec
+        'cum/oper-year': 3.52775e-08, # 1 cum/oper-year = 3.52775e-08 m³/sec
+        
+        # VOLUME (cum 기준)
+        'cum': 1.0,
+        'cuft': 0.0283168,       # 1 cuft = 0.0283168 m³
+        'l': 0.001,              # 1 l = 0.001 m³
+        'cuin': 1.63871e-05,     # 1 cuin = 1.63871e-05 m³
+        'gal': 0.00378541,       # 1 gal = 0.00378541 m³
+        'bbl': 0.158987,         # 1 bbl = 0.158987 m³
+        'cc': 0.000001,          # 1 cc = 0.000001 m³
+        'kcum': 1000.0,          # 1 kcum = 1000 m³
+        'Mcum': 1000000.0,       # 1 Mcum = 1,000,000 m³
+        'Mcuft': 28316.8,        # 1 Mcuft = 28,316.8 m³
+        'MMcuft': 28316800.0,    # 1 MMcuft = 28,316,800 m³
+        'ml': 0.000001,          # 1 ml = 0.000001 m³
+        'kl': 1.0,               # 1 kl = 1 m³
+        'MMl': 1000000.0,        # 1 MMl = 1,000,000 m³
+        'Mgal': 3785.41,         # 1 Mgal = 3,785.41 m³
+        'MMgal': 3785410.0,      # 1 MMgal = 3,785,410 m³
+        'UKgal': 0.00454609,     # 1 UKgal = 0.00454609 m³
+        'MUKgal': 4546.09,       # 1 MUKgal = 4,546.09 m³
+        'MMUKgal': 4546090.0,    # 1 MMUKgal = 4,546,090 m³
+        'Mbbl': 158987.0,        # 1 Mbbl = 158,987 m³
+        'MMbbl': 158987000.0,    # 1 MMbbl = 158,987,000 m³
+        'kbbl': 158.987,         # 1 kbbl = 158.987 m³
+        'cuyd': 0.764555,        # 1 cuyd = 0.764555 m³
+        
+        # VELOCITY (m/sec 기준)
+        'm/sec': 1.0,
+        'ft/sec': 0.3048,        # 1 ft/sec = 0.3048 m/sec
+        'mile/hr': 0.44704,      # 1 mile/hr = 0.44704 m/sec
+        'km/hr': 0.277778,       # 1 km/hr = 0.277778 m/sec
+        'ft/min': 0.00508,       # 1 ft/min = 0.00508 m/sec
+        'mm/day': 1.15741e-08,   # 1 mm/day = 1.15741e-08 m/sec
+        'mm/hr': 2.77778e-07,    # 1 mm/hr = 2.77778e-07 m/sec
+        'mm/day30': 1.15741e-08, # 1 mm/day30 = 1.15741e-08 m/sec
+        'in/day': 2.93995e-07,   # 1 in/day = 2.93995e-07 m/sec
+        
+        # DENSITY (kg/cum 기준)
+        'kg/cum': 1.0,
+        'lb/cuft': 16.0185,      # 1 lb/cuft = 16.0185 kg/m³
+        'gm/cc': 1000.0,         # 1 gm/cc = 1000 kg/m³
+        'lb/gal': 119.826,       # 1 lb/gal = 119.826 kg/m³
+        'gm/cum': 0.001,         # 1 gm/cum = 0.001 kg/m³
+        'gm/ml': 1000.0,         # 1 gm/ml = 1000 kg/m³
+        'lb/bbl': 2.85301,       # 1 lb/bbl = 2.85301 kg/m³
+        'gm/l': 1.0,             # 1 gm/l = 1 kg/m³
+        'mg/l': 0.001,           # 1 mg/l = 0.001 kg/m³
+        'mg/cc': 1.0,            # 1 mg/cc = 1 kg/m³
+        'mg/cum': 0.000001,      # 1 mg/cum = 0.000001 kg/m³
+        
+        # MOLE-DENSITY (kmol/cum 기준)
+        'kmol/cum': 1.0,
+        'lbmol/cuft': 16.0185,   # 1 lbmol/cuft = 16.0185 kmol/m³
+        'mol/cc': 1000.0,        # 1 mol/cc = 1000 kmol/m³
+        'lbmol/gal': 119.826,    # 1 lbmol/gal = 119.826 kmol/m³
+        'mol/l': 1.0,            # 1 mol/l = 1 kmol/m³
+        'mmol/cc': 1.0,          # 1 mmol/cc = 1 kmol/m³
+        'mmol/l': 0.001,         # 1 mmol/l = 0.001 kmol/m³
+        
+        # MASS-DENSITY (kg/cum 기준) - DENSITY와 동일
+        'kg/cum': 1.0,
+        'lb/cuft': 16.0185,      # 1 lb/cuft = 16.0185 kg/m³
+        'gm/cc': 1000.0,         # 1 gm/cc = 1000 kg/m³
+        'lb/gal': 119.826,       # 1 lb/gal = 119.826 kg/m³
+        'gm/cum': 0.001,         # 1 gm/cum = 0.001 kg/m³
+        'gm/ml': 1000.0,         # 1 gm/ml = 1000 kg/m³
+        'lb/bbl': 2.85301,       # 1 lb/bbl = 2.85301 kg/m³
+        'gm/l': 1.0,             # 1 gm/l = 1 kg/m³
+        'mg/l': 0.001,           # 1 mg/l = 0.001 kg/m³
+        'mg/cc': 1.0,            # 1 mg/cc = 1 kg/m³
+        'mg/cum': 0.000001,      # 1 mg/cum = 0.000001 kg/m³
+        
+        # MOLE-VOLUME (cum/kmol 기준)
+        'cum/kmol': 1.0,
+        'cuft/lbmol': 0.0624280, # 1 cuft/lbmol = 0.0624280 m³/kmol
+        'cc/mol': 0.001,         # 1 cc/mol = 0.001 m³/kmol
+        'ml/mol': 0.001,         # 1 ml/mol = 0.001 m³/kmol
+        'bbl/mscf': 0.158987,    # 1 bbl/mscf = 0.158987 m³/kmol
+        
+        # ELEC-POWER (Watt 기준) - POWER와 동일
+        'Watt': 1.0,
+        'kW': 1000.0,            # 1 kW = 1000 W
+        'MW': 1000000.0,         # 1 MW = 1,000,000 W
+        'GW': 1000000000.0,      # 1 GW = 1,000,000,000 W
+        
+        # UA (J/sec-K 기준)
+        'J/sec-K': 1.0,
+        'Btu/hr-R': 0.527527,    # 1 Btu/hr-R = 0.527527 J/(s·K)
+        'cal/sec-K': 4.184,      # 1 cal/sec-K = 4.184 J/(s·K)
+        'kJ/sec-K': 1000.0,      # 1 kJ/sec-K = 1000 J/(s·K)
+        'kcal/sec-K': 4184.0,    # 1 kcal/sec-K = 4184 J/(s·K)
+        'kcal/hr-K': 1.16222,    # 1 kcal/hr-K = 1.16222 J/(s·K)
+        'Btu/hr-F': 0.527527,    # 1 Btu/hr-F = 0.527527 J/(s·K)
+        'kW/k': 1000.0,          # 1 kW/k = 1000 J/(s·K)
+        
+        # WORK (J 기준) - ENERGY와 동일
+        'J': 1.0,
+        'hp-hr': 2684520.0,      # 1 hp-hr = 2,684,520 J
+        'kW-hr': 3600000.0,      # 1 kW-hr = 3,600,000 J
+        'ft-lbf': 1.35582,       # 1 ft-lbf = 1.35582 J
+        'kJ': 1000.0,            # 1 kJ = 1000 J
+        'N-m': 1.0,              # 1 N-m = 1 J
+        'MJ': 1000000.0,         # 1 MJ = 1,000,000 J
+        'Mbtu': 1055060000.0,    # 1 Mbtu = 1,055,060,000 J
+        'MMBtu': 1055060000000.0, # 1 MMBtu = 1,055,060,000,000 J
+        'Mcal': 4184000.0,       # 1 Mcal = 4,184,000 J
+        'Gcal': 4184000000.0,    # 1 Gcal = 4,184,000,000 J
+        
+        # HEAT (J 기준) - ENERGY와 동일
+        'J': 1.0,
+        'Btu': 1055.06,          # 1 Btu = 1055.06 J
+        'cal': 4.184,            # 1 cal = 4.184 J
+        'kcal': 4184.0,          # 1 kcal = 4184 J
+        'Mmkcal': 4184000000000000.0, # 1 Mmkcal = 4,184,000,000,000,000 J
+        'MMBtu': 1055060000000.0, # 1 MMBtu = 1,055,060,000,000 J
+        'Pcu': 1055.06,          # 1 Pcu = 1055.06 J
+        'MMPcu': 1055060000000.0, # 1 MMPcu = 1,055,060,000,000 J
+        'kJ': 1000.0,            # 1 kJ = 1000 J
+        'GJ': 1000000000.0,      # 1 GJ = 1,000,000,000 J
+        'N-m': 1.0,              # 1 N-m = 1 J
+        'MJ': 1000000.0,         # 1 MJ = 1,000,000 J
+        'Mcal': 4184000.0,       # 1 Mcal = 4,184,000 J
+        'Gcal': 4184000000.0,    # 1 Gcal = 4,184,000,000 J
+        'Mbtu': 1055060000.0,    # 1 Mbtu = 1,055,060,000 J
+        'kW-hr': 3600000.0,      # 1 kW-hr = 3,600,000 J
+        
+        # COMPOSITION (mol-fr 기준) - 무차원이므로 변환 불필요
+        'mol-fr': 1.0,
+        'mass-fr': 1.0           # 질량분율도 무차원
+    }
+    
+    return conversion_factors
+
+def convert_temperature_to_kelvin(value, from_unit):
+    """
+    온도를 켈빈으로 변환하는 특별 함수
+    """
+    if from_unit == 'K':
+        return value
+    elif from_unit == 'C':
+        return value + 273.15
+    elif from_unit == 'F':
+        return (value - 32) * 5/9 + 273.15
+    elif from_unit == 'R':
+        return value * 5/9
+    else:
+        raise ValueError(f"Unsupported temperature unit: {from_unit}")
+
+def convert_pressure_gauge_to_absolute(value, from_unit):
+    """
+    게이지 압력을 절대 압력으로 변환하는 특별 함수
+    """
+    if from_unit == 'psig':
+        return value + 14.696  # psig to psia
+    elif from_unit == 'atmg':
+        return value + 1.0     # atmg to atm
+    elif from_unit == 'barg':
+        return value + 1.01325 # barg to bar
+    elif from_unit == 'Pag':
+        return value + 101325.0 # Pag to Pa
+    elif from_unit == 'kPag':
+        return value + 101.325 # kPag to kPa
+    elif from_unit == 'MPag':
+        return value + 0.101325 # MPag to MPa
+    elif from_unit == 'mbarg':
+        return value + 1013.25 # mbarg to mbar
+    else:
+        return value  # 이미 절대 압력인 경우
+
+def convert_to_si_units(value, from_unit, unit_type):
+    """
+    통합 단위 환산 함수: 임의의 단위를 SI 기준 단위로 변환
+    
+    Parameters:
+    -----------
+    value : float
+        변환할 값
+    from_unit : str
+        원래 단위 (예: 'psig', 'lb/hr', 'F' 등)
+    unit_type : str
+        물리량 타입 (예: 'PRESSURE', 'MASS-FLOW', 'TEMPERATURE' 등)
+    
+    Returns:
+    --------
+    tuple : (converted_value, si_unit)
+        변환된 값과 SI 단위
+    """
+    try:
+        # SI 기준 단위 가져오기
+        si_base_units = get_si_base_units()
+        conversion_factors = get_unit_conversion_factors()
+        
+        # 단위 타입 검증
+        if unit_type not in si_base_units:
+            raise ValueError(f"Unsupported unit type: {unit_type}")
+        
+        si_unit = si_base_units[unit_type]
+        
+        # 이미 SI 단위인 경우
+        if from_unit == si_unit:
+            return value, si_unit
+        
+        # 특별 변환이 필요한 경우들
+        if unit_type == 'TEMPERATURE':
+            # 온도는 특별 변환 함수 사용
+            converted_value = convert_temperature_to_kelvin(value, from_unit)
+            return converted_value, si_unit
+        
+        elif unit_type == 'PRESSURE':
+            # 압력의 경우 게이지 압력 처리
+            if from_unit in ['psig', 'atmg', 'barg', 'Pag', 'kPag', 'MPag', 'mbarg']:
+                # 게이지 압력을 절대 압력으로 변환
+                abs_value = convert_pressure_gauge_to_absolute(value, from_unit)
+                # 절대 압력 단위로 변환
+                if from_unit == 'psig':
+                    from_unit = 'PsIa'  # psia로 변환
+                elif from_unit == 'atmg':
+                    from_unit = 'atm'
+                elif from_unit == 'barg':
+                    from_unit = 'bar'
+                elif from_unit == 'Pag':
+                    from_unit = 'pa'
+                elif from_unit == 'kPag':
+                    from_unit = 'kPa'
+                elif from_unit == 'MPag':
+                    from_unit = 'MiPa'
+                elif from_unit == 'mbarg':
+                    from_unit = 'mbar'
+                value = abs_value
+            
+            # 환산 계수 확인
+            if from_unit not in conversion_factors:
+                raise ValueError(f"Unsupported pressure unit: {from_unit}")
+            
+            factor = conversion_factors[from_unit]
+            if isinstance(factor, str):
+                raise ValueError(f"Special conversion required for {from_unit}, but not implemented")
+            
+            converted_value = value * factor
+            return converted_value, si_unit
+        
+        else:
+            # 일반적인 단위 변환
+            if from_unit not in conversion_factors:
+                raise ValueError(f"Unsupported unit: {from_unit}")
+            
+            factor = conversion_factors[from_unit]
+            if isinstance(factor, str):
+                raise ValueError(f"Special conversion required for {from_unit}, but not implemented")
+            
+            converted_value = value * factor
+            return converted_value, si_unit
+            
+    except Exception as e:
+        raise ValueError(f"Unit conversion error: {str(e)}")
+
+def convert_multiple_values_to_si(values_dict, units_dict, unit_types_dict):
+    """
+    여러 값들을 한 번에 SI 단위로 변환하는 함수
+    
+    Parameters:
+    -----------
+    values_dict : dict
+        변환할 값들의 딕셔너리 {parameter_name: value}
+    units_dict : dict
+        각 값의 단위 딕셔너리 {parameter_name: unit}
+    unit_types_dict : dict
+        각 값의 물리량 타입 딕셔너리 {parameter_name: unit_type}
+    
+    Returns:
+    --------
+    dict : {parameter_name: (converted_value, si_unit)}
+    """
+    converted_results = {}
+    
+    for param_name, value in values_dict.items():
+        if param_name in units_dict and param_name in unit_types_dict:
+            try:
+                from_unit = units_dict[param_name]
+                unit_type = unit_types_dict[param_name]
+                converted_value, si_unit = convert_to_si_units(value, from_unit, unit_type)
+                converted_results[param_name] = (converted_value, si_unit)
+            except Exception as e:
+                print(f"Warning: Failed to convert {param_name}: {str(e)}")
+                converted_results[param_name] = (value, units_dict[param_name])
+        else:
+            print(f"Warning: Missing unit information for {param_name}")
+            converted_results[param_name] = (value, "unknown")
+    
+    return converted_results
+
+
+
+#======================================================================
 # Unit Table Functions
 #======================================================================
 
@@ -604,18 +1204,18 @@ def get_physical_quantity_by_unit_type(unit_table, unit_type_name):
 #======================================================================
 
 # 하드코딩된 단위 테이블 사용
-print(f"\n📋 Using hardcoded unit data...")
+# 하드코딩된 단위 테이블 사용
 unit_table = get_hardcoded_unit_table()
 
-print(f"Unit table loaded successfully: {len(unit_table)} unit types found")
+# Unit table loaded successfully
 
 # 각 unit_type별로 몇 개의 unit이 있는지 출력
 for csv_col_idx in sorted(unit_table.keys()):
     unit_type_name = unit_table[csv_col_idx]['unit_type']
     unit_count = len(unit_table[csv_col_idx]['units'])
-    print(f"  Column {csv_col_idx} ({unit_type_name}): {unit_count} units")
+    # 각 unit_type별로 몇 개의 unit이 있는지 출력
 
-print("\nDetecting unit sets from Aspen Plus...")
+# Detecting unit sets from Aspen Plus...
 units_spinner = Spinner('Detecting unit sets')
 units_spinner.start()
 
@@ -626,20 +1226,208 @@ units_spinner.stop('Unit sets detected successfully!')
 # 단위 세트 요약 출력
 print_units_sets_summary(units_sets)
 
-# 모든 경우에 하드코딩된 데이터 사용
-if units_sets:
-    print("\n" + "="*80)
-    print("UNIT SETS DETAILS (WITH HARDCODED DATA)")
-    print("="*80)
+# 현재 사용 중인 Unit Set 감지
+current_unit_set = get_current_unit_set(Application)
+
+#======================================================================
+# Pressure-driven equipment cost estimation wrapper
+#======================================================================
+
+def calculate_pressure_device_costs(material: str = 'CS', target_year: int = 2024, material_overrides: dict = None):
+    # 2024년 CEPCI 인덱스 설정
+    target_index = 800.0  # 2024년 추정값
+    cepci = CEPCIOptions(target_index=target_index)
     
-    for unit_set_name in units_sets:
-        unit_details = get_unit_set_details(Application, unit_set_name, unit_table)
-        print_unit_set_details(unit_details)
+    print(f"CEPCI 설정: 기준년도 2017 (인덱스: 567.5) → 목표년도 {target_year} (인덱스: {target_index})")
+    
+    return calculate_pressure_device_costs_auto(
+        Application,
+        block_info,
+        current_unit_set,
+        material=material,
+        cepci=cepci,
+        material_overrides=material_overrides,
+    )
 
-else:
-    print("No unit sets found in Aspen Plus")
 
-print(f"\n" + "="*60)
-print("UNITS SETS DETECTION COMPLETED")
-print("="*60)
+#======================================================================
+# Run cost calculation and print results
+#======================================================================
+
+try:
+    register_default_correlations()
+    
+    # 캐시 초기화
+    clear_aspen_cache()
+    
+    # 1) Preview
+    preview = preview_pressure_devices_auto(Application, block_info, current_unit_set)
+    
+    # 캐시 통계 출력
+    cache_stats = get_cache_stats()
+    # 캐시 통계 출력
+    
+    # 프리뷰 결과 출력 (모듈 함수 사용)
+    power_unit = None
+    pressure_unit = None
+    flow_unit = None
+    if current_unit_set:
+        power_unit = _get_unit_type_value(Application, current_unit_set, 'POWER')
+        pressure_unit = _get_unit_type_value(Application, current_unit_set, 'PRESSURE')
+        flow_unit = _get_unit_type_value(Application, current_unit_set, 'VOLUME-FLOW')
+    print_preview_results(preview, Application, power_unit, pressure_unit)
+
+    # 2) Build pre-extracted dict from preview (freeze values)
+    pre_extracted = {}
+    for p in preview:
+        pre_extracted[p['name']] = {
+            'power_kilowatt': p.get('power_kilowatt'),
+            'volumetric_flow_m3_s': p.get('volumetric_flow_m3_s'),  # 팬용 부피유량 데이터 추가
+            'inlet_bar': p.get('inlet_bar'),
+            'outlet_bar': p.get('outlet_bar'),
+            'stage_data': p.get('stage_data'),  # MCompr의 stage_data 포함
+        }
+
+    # 3) Material, Type and Subtype overrides (simple CLI prompt)
+    material_overrides = {}
+    type_overrides = {}
+    subtype_overrides = {}
+    while True:
+        ans = input("\n설계 조건을 변경할 장치 이름을 입력하세요 (없으면 엔터): ").strip()
+        if not ans:
+            break
+        
+        # 해당 장치 찾기
+        device_info = None
+        for p in preview:
+            if p['name'] == ans:
+                device_info = p
+                break
+        
+        if not device_info:
+            print(f"장치 '{ans}'를 찾을 수 없습니다.")
+            continue
+        
+        print(f"\n선택된 장치: {ans} ({device_info['category']})")
+        print(f"현재 타입: {device_info.get('selected_type', 'N/A')}")
+        print(f"현재 세부 타입: {device_info.get('selected_subtype', 'N/A')}")
+        
+        # 선택 가능한 타입과 세부 타입 표시
+        from equipment_costs import get_device_type_options
+        type_options = get_device_type_options(device_info['category'])
+        
+        if type_options:
+            print("\n사용 가능한 타입과 세부 타입:")
+            for main_type, subtypes in type_options.items():
+                print(f"  {main_type}: {', '.join(subtypes)}")
+            
+            # 타입 변경
+            type_input = input("\n타입을 변경하시겠습니까? (y/n): ").strip().lower()
+            if type_input == 'y':
+                print("\n사용 가능한 타입:")
+                main_types = list(type_options.keys())
+                for i, t in enumerate(main_types, 1):
+                    print(f"  {i}. {t}")
+                
+                try:
+                    type_choice = int(input("타입 번호를 선택하세요: ").strip())
+                    if 1 <= type_choice <= len(main_types):
+                        selected_type = main_types[type_choice - 1]
+                        type_overrides[ans] = selected_type
+                        print(f"{ans}의 타입이 {selected_type}로 변경되었습니다.")
+                        
+                        # 세부 타입 선택
+                        available_subtypes = type_options[selected_type]
+                        print(f"\n사용 가능한 세부 타입:")
+                        for i, st in enumerate(available_subtypes, 1):
+                            print(f"  {i}. {st}")
+                        
+                        try:
+                            subtype_choice = int(input("세부 타입 번호를 선택하세요: ").strip())
+                            if 1 <= subtype_choice <= len(available_subtypes):
+                                selected_subtype = available_subtypes[subtype_choice - 1]
+                                subtype_overrides[ans] = selected_subtype
+                                print(f"{ans}의 세부 타입이 {selected_subtype}로 변경되었습니다.")
+                            else:
+                                print("잘못된 번호입니다.")
+                        except ValueError:
+                            print("숫자를 입력해주세요.")
+                    else:
+                        print("잘못된 번호입니다.")
+                except ValueError:
+                    print("숫자를 입력해주세요.")
+        
+        # 재질 변경
+        mat = input("변경할 재질을 입력하세요 (예: CS, SS, Ni, Cl, Ti, Fiberglass, 없으면 엔터): ").strip()
+        if mat:
+            material_overrides[ans] = mat
+            print(f"{ans}의 재질이 {mat}로 변경되었습니다.")
+        
+        # 변경사항이 있으면 프리뷰 다시 표시
+        if ans in material_overrides or ans in type_overrides or ans in subtype_overrides:
+            print("\n" + "="*60)
+            print("UPDATED PREVIEW: PRESSURE-DRIVEN DEVICES")
+            print("="*60)
+            
+            # 업데이트된 프리뷰 데이터 생성
+            updated_preview = []
+            for p in preview:
+                updated_p = p.copy()
+                device_name = p['name']
+                
+                # 모든 오버라이드 적용 (현재 장치와 이전에 변경한 장치들 모두)
+                if device_name in material_overrides:
+                    updated_p['material'] = material_overrides[device_name]
+                if device_name in type_overrides:
+                    updated_p['selected_type'] = type_overrides[device_name]
+                if device_name in subtype_overrides:
+                    updated_p['selected_subtype'] = subtype_overrides[device_name]
+                    
+                updated_preview.append(updated_p)
+            
+            # 업데이트된 프리뷰 출력
+            print_preview_results(updated_preview, Application, power_unit, pressure_unit)
+    confirm = input("\n위 데이터/재질로 비용 계산을 진행할까요? (y/n): ").strip().lower()
+    if confirm != 'y':
+        print("사용자에 의해 계산이 취소되었습니다.")
+        raise SystemExit(0)
+
+    # 4) Run using pre-extracted data (no further COM reads)
+    pressure_device_costs, pressure_device_totals = calculate_pressure_device_costs_with_data(
+        pre_extracted=pre_extracted,
+        block_info=block_info,
+        material='CS',
+        cepci=CEPCIOptions(target_index=800.0),  # 2024년 CEPCI 인덱스
+        material_overrides=material_overrides,
+        type_overrides=type_overrides,
+        subtype_overrides=subtype_overrides,
+    )
+    if pressure_device_costs:
+        print("\n" + "="*60)
+        print("CALCULATED PRESSURE DEVICE COSTS")
+        print("="*60)
+        for item in pressure_device_costs:
+            name = item.get('name')
+            dtype = item.get('type')
+            installed = item.get('installed', 0.0)
+            bare = item.get('bare_module', 0.0)
+            
+            if dtype == 'error':
+                error_msg = item.get('error', 'Unknown error')
+                print(f"{name} (error): {error_msg}")
+            else:
+                print(f"{name} ({dtype}): Installed = {installed:,.2f} USD, Bare = {bare:,.2f} USD")
+        print(f"\nTotal Installed Cost for Pressure Devices: {pressure_device_totals.get('installed', 0.0):,.2f} USD")
+        print(f"Total Bare Module Cost for Pressure Devices: {pressure_device_totals.get('bare_module', 0.0):,.2f} USD")
+        print("="*60)
+    else:
+        print("No pressure device costs calculated.")
+        
+    # 최종 캐시 통계 출력
+    final_cache_stats = get_cache_stats()
+    # 최종 캐시 통계 출력
+    
+except Exception as e:
+    print(f"Error during pressure device cost calculation/printing: {e}")
+
     
