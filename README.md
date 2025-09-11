@@ -18,9 +18,9 @@ Aspen Plus 시뮬레이션 파일을 분석하여 장비 비용을 계산하는 
 ```bash
 python TEA_machine.py
 ```
-## 현재까지 진행 상황
+# 현재까지 진행 상황
 
-코드 실행 결과
+## 코드 실행 결과
 
 Looking for file: c:\Users\###\###\###\####\Equipment_cost_estimation_aspen.bkp
 
