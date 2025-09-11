@@ -30,9 +30,11 @@ Attempting to open file: c:\Users\###\###\###\####\Equipment_cost_estimation_asp
 File opened successfully!
 Aspen Plus is now visible
 ## 장비 탐지
+```
 ['01PUMP', '02HEX', '02HEX-1', '03HEX', '03HEX-1', '04HEX', '05HDO-RE', '06REQUIL', '07SPLIT', '08MIXER', '09HEX', '09HEX-1', '10HEX', '10HEX-1', '11HEX', '12VALVE', '13SEP', '14HEX', '14HEX-1', '15ABS', '16HEX', '16HEX-1', '17HCC-RE', '18HEX', '18HEX-1', '19HEX', '19HEX-1', '20HEX', '21HEX', '22HEX', '23SEP', '24VALVE', '25PSA', '26DISTIL', '27DISTIL', '28COMP', '29MIXER', '30SPLIT', '31COMP', '32VALVE', '33MIXER', '34COMB', '35HEX', '36SPLIT', 'B1', 'B3', 'B4', 'B5']
-
+```
 ## 장비 분류
+```
 ============================================================
 DEVICE CATEGORIES
 ============================================================
@@ -102,8 +104,9 @@ Other Devices (0 devices):
 ============================================================
 DEVICE LOADING COMPLETED
 ============================================================
-
+```
 ## 아스펜 내부에서 사용 중인 Units-sets 탐지
+```
 Unit sets detected successfully!
 
 ============================================================
@@ -121,12 +124,14 @@ Unit sets:
    7. SI-CBAR
    8. T-D
    9. US-1
-
+```
 ## 현재 Simulation sheet에서 활성화 중인 Units set 감지
+```
 ============================================================
 Current unit set: FORHI
-
+```
 ## 장치비 계산 전 재질 및 장비 타입 검토 및 변경 예시
+```
 ============================================================
 PREVIEW: PRESSURE-DRIVEN DEVICES (extracted data)
 ============================================================
@@ -221,7 +226,8 @@ B4                   | Compr        | P=-801.822175 kW | Pin=15.0 bar | Pout=3.0
 설계 조건을 변경할 장치 이름을 입력하세요 (없으면 엔터):
 
 위 데이터/재질로 비용 계산을 진행할까요? (y/n): y
-## 장치비 산정 과정 디버깅용 추후 verbose 옵션을 통해 계산 내역 출력 디테일 정도를 조절하는 옵션 추가
+```
+## 장치비 산정 과정 (디버깅용) 추후 verbose 옵션을 통해 계산 내역 출력 디테일 정도를 조절하는 옵션 추가
 ```
 PUMP RECIPROCATING: Input power = 135.5387 kW
 Unit conversion: 135.5387 kW -> 135.5387 kW
@@ -371,6 +377,7 @@ TURBINE AXIAL: Bare Module cost calculation
   Bare module cost: 344902.25 * 3.500 = 1207157.89 USD
 ```
 ## 최종 계산 및 오류(발생 시) 원인 출력
+```
 ============================================================
 CALCULATED PRESSURE DEVICE COSTS
 ============================================================
@@ -383,3 +390,4 @@ B4 (turbine): Bare Module Cost = 1,207,157.89 USD
 Total Bare Module Cost for Pressure Devices: 9,793,198.45 USD
 Note: Bare Module Cost includes installation costs
 ============================================================
+```
