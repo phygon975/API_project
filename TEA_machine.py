@@ -17,11 +17,64 @@ from equipment_costs import (
     calculate_pressure_device_costs_auto,
     preview_pressure_devices_auto,
     print_preview_results,
+    preview_heat_exchangers_auto,
+    print_preview_hx_results,
+    estimate_heat_exchanger_cost,
+    get_hx_material_options,
     calculate_pressure_device_costs_with_data,
     clear_aspen_cache,
     get_cache_stats,
-    _get_unit_type_value,
 )
+from aspen_data_extractor import get_unit_type_value
+from unit_converter import get_cepi_index
+from config import (
+    DEFAULT_MATERIAL, DEFAULT_TARGET_YEAR, DEFAULT_CEPCI_BASE_INDEX,
+    OUTPUT_SEPARATOR_LENGTH, ENABLE_DEBUG_OUTPUT
+)
+import pickle
+from dataclasses import dataclass, field
+from typing import Dict, List, Any
+import contextlib
+
+
+#======================================================================
+# Session model for preview/overrides persistence
+#======================================================================
+@dataclass
+class PreviewSession:
+    """프리뷰 결과와 사용자 오버라이드를 한 번에 저장/복원하는 세션 컨테이너"""
+    aspen_file: str
+    current_unit_set: Optional[str]
+    block_info: Dict[str, str]  # {block_name: category}
+    preview: List[Dict[str, Any]]  # preview_pressure_devices_auto 결과
+    material_overrides: Dict[str, str] = field(default_factory=dict)
+    type_overrides: Dict[str, str] = field(default_factory=dict)
+    subtype_overrides: Dict[str, str] = field(default_factory=dict)
+
+    def apply_overrides_to_preview(self) -> List[Dict[str, Any]]:
+        updated_preview: List[Dict[str, Any]] = []
+        for p in self.preview:
+            up = p.copy()
+            name = p.get('name')
+            if name in self.material_overrides:
+                up['material'] = self.material_overrides[name]
+            if name in self.type_overrides:
+                up['selected_type'] = self.type_overrides[name]
+            if name in self.subtype_overrides:
+                up['selected_subtype'] = self.subtype_overrides[name]
+            updated_preview.append(up)
+        return updated_preview
+
+    def save(self, path: str) -> None:
+        with open(path, 'wb') as f:
+            pickle.dump(self, f)
+
+    @staticmethod
+    def load(path: str) -> "PreviewSession":
+        with open(path, 'rb') as f:
+            return pickle.load(f)
+
+    # JSON 저장 기능은 혼동 방지를 위해 비활성화됨
 
 #======================================================================
 # Spinner
@@ -64,12 +117,39 @@ class Spinner:
 #======================================================================
 # Aspen Plus Connection
 #======================================================================
-file = 'Equipment_cost_estimation_aspen.bkp'  #아스펜 파일이 바뀔 시 여기를 수정해야 함
 
-    # 2. Get absolute path to Aspen Plus file
+# 현재 폴더에서 .bkp 파일 자동 탐지 및 선택
 current_dir = os.path.dirname(os.path.abspath(__file__))
-aspen_Path = os.path.join(current_dir, file)
-print(f"Looking for file: {aspen_Path}")
+# 최근 수정순으로 정렬된 .bkp 파일 목록
+all_bkps = [f for f in os.listdir(current_dir) if f.lower().endswith('.bkp')]
+bkp_files = sorted(all_bkps, key=lambda f: os.path.getmtime(os.path.join(current_dir, f)), reverse=True)
+
+selected_bkp = None
+if not bkp_files:
+    # 기본 파일명으로 시도 (기존 동작 유지)
+    default_file = 'Equipment_cost_estimation_aspen.bkp'
+    print("경고: 현재 폴더에서 .bkp 파일을 찾지 못했습니다.")
+    print(f"기본 파일명으로 시도합니다: {default_file}")
+    selected_bkp = default_file
+else:
+    print("\n감지된 .bkp 파일 목록:")
+    for i, fname in enumerate(bkp_files, 1):
+        print(f"  {i}. {fname}")
+    # 사용자에게 선택 받기 (검증 포함)
+    while True:
+        try:
+            choice = input("사용할 .bkp 파일 번호를 선택하세요 (숫자): ").strip()
+            idx = int(choice)
+            if 1 <= idx <= len(bkp_files):
+                selected_bkp = bkp_files[idx - 1]
+                break
+            else:
+                print("잘못된 번호입니다. 다시 입력해주세요.")
+        except ValueError:
+            print("숫자를 입력해주세요.")
+
+aspen_Path = os.path.join(current_dir, selected_bkp)
+print(f"선택된 파일: {aspen_Path}")
 
 try:
     # 4. Initiate Aspen Plus application
@@ -1255,13 +1335,60 @@ def calculate_pressure_device_costs(material: str = 'CS', target_year: int = 202
 #======================================================================
 
 try:
+    # 출력 상세 수준 설정: 0=조용, 1=보통, 2=상세
+    VERBOSITY = 1
+    try:
+        vv = input("출력 수준을 선택하세요 (0=조용, 1=보통, 2=상세, 기본=1): ").strip()
+        if vv in ('0','1','2'):
+            VERBOSITY = int(vv)
+    except Exception:
+        pass
+
+    # 장치별 세부 출력 토글 기능 제거 (단순화)
+
     register_default_correlations()
     
     # 캐시 초기화
     clear_aspen_cache()
     
-    # 1) Preview
-    preview = preview_pressure_devices_auto(Application, block_info, current_unit_set)
+    # 1) Preview (세션 불러오기 옵션)
+    session: Optional[PreviewSession] = None
+    load_choice = input("기존 세션을 불러오시겠습니까? (y/n): ").strip().lower()
+    if load_choice == 'y':
+        try:
+            # 현재 폴더의 .pkl 세션을 최근 수정순으로 나열 후 선택
+            session_files_all = [f for f in os.listdir(current_dir) if f.lower().endswith('.pkl')]
+            session_files = sorted(session_files_all, key=lambda f: os.path.getmtime(os.path.join(current_dir, f)), reverse=True)
+            if not session_files:
+                print("불러올 .pkl 세션이 없습니다.")
+                session = None
+                preview = preview_pressure_devices_auto(Application, block_info, current_unit_set)
+            else:
+                print("\n감지된 세션(.pkl) 목록:")
+                for i, fname in enumerate(session_files, 1):
+                    print(f"  {i}. {fname}")
+                while True:
+                    try:
+                        choice = int(input("불러올 세션 번호를 선택하세요: ").strip())
+                        if 1 <= choice <= len(session_files):
+                            load_path = os.path.join(current_dir, session_files[choice - 1])
+                            break
+                        else:
+                            print("잘못된 번호입니다. 다시 입력해주세요.")
+                    except ValueError:
+                        print("숫자를 입력해주세요.")
+                session = PreviewSession.load(load_path)
+            if os.path.basename(session.aspen_file) != os.path.basename(aspen_Path):
+                print(f"경고: 세션 파일({session.aspen_file})이 현재 파일({aspen_Path})과 다릅니다. 세션 데이터를 그대로 사용합니다.")
+            preview = session.apply_overrides_to_preview()
+            material_overrides = dict(session.material_overrides)
+            type_overrides = dict(session.type_overrides)
+            subtype_overrides = dict(session.subtype_overrides)
+        except Exception as e:
+            print(f"세션 불러오기 실패: {e}")
+            preview = preview_pressure_devices_auto(Application, block_info, current_unit_set)
+    else:
+        preview = preview_pressure_devices_auto(Application, block_info, current_unit_set)
     
     # 캐시 통계 출력
     cache_stats = get_cache_stats()
@@ -1271,102 +1398,229 @@ try:
     power_unit = None
     pressure_unit = None
     flow_unit = None
+    heat_unit = None
+    temperature_unit = None
     if current_unit_set:
-        power_unit = _get_unit_type_value(Application, current_unit_set, 'POWER')
-        pressure_unit = _get_unit_type_value(Application, current_unit_set, 'PRESSURE')
-        flow_unit = _get_unit_type_value(Application, current_unit_set, 'VOLUME-FLOW')
-    print_preview_results(preview, Application, power_unit, pressure_unit)
+                power_unit = get_unit_type_value(Application, current_unit_set, 'POWER')
+                pressure_unit = get_unit_type_value(Application, current_unit_set, 'PRESSURE')
+                flow_unit = get_unit_type_value(Application, current_unit_set, 'VOLUME-FLOW')
+                heat_unit = get_unit_type_value(Application, current_unit_set, 'HEAT')
+                temperature_unit = get_unit_type_value(Application, current_unit_set, 'TEMPERATURE')
+    
+    # 기존의 잘 작동하던 프리뷰 함수 사용
+    preview = preview_pressure_devices_auto(Application, block_info, current_unit_set)
+    
+    if VERBOSITY >= 1:
+        print_preview_results(preview, Application, power_unit, pressure_unit)
 
-    # 2) Build pre-extracted dict from preview (freeze values)
-    pre_extracted = {}
-    for p in preview:
-        pre_extracted[p['name']] = {
-            'power_kilowatt': p.get('power_kilowatt'),
-            'volumetric_flow_m3_s': p.get('volumetric_flow_m3_s'),  # 팬용 부피유량 데이터 추가
-            'inlet_bar': p.get('inlet_bar'),
-            'outlet_bar': p.get('outlet_bar'),
-            'stage_data': p.get('stage_data'),  # MCompr의 stage_data 포함
-        }
-
-    # 3) Material, Type and Subtype overrides (simple CLI prompt)
-    material_overrides = {}
-    type_overrides = {}
-    subtype_overrides = {}
+    # 통합 장치 오버라이드 UI
+    print("\n" + "="*60)
+    print("EQUIPMENT DESIGN OVERRIDES")
+    print("="*60)
+    
+    # 모든 장치를 하나의 리스트로 통합 (압력 장치만)
+    all_devices = []
+    for device in preview:
+        device['device_type'] = 'pressure'
+        all_devices.append(device)
+    
+    # 장치 이름으로 정렬
+    all_devices.sort(key=lambda x: x['name'])
+    
+    # 통합 오버라이드 루프
+    material_overrides = material_overrides if 'material_overrides' in locals() else {}
+    type_overrides = type_overrides if 'type_overrides' in locals() else {}
+    subtype_overrides = subtype_overrides if 'subtype_overrides' in locals() else {}
+    
     while True:
-        ans = input("\n설계 조건을 변경할 장치 이름을 입력하세요 (없으면 엔터): ").strip()
+        print("\n사용 가능한 장치 목록:")
+        for i, device in enumerate(all_devices, 1):
+            device_type = device.get('device_type', 'unknown')
+            if device_type == 'pressure':
+                cat = device.get('category', 'Unknown')
+                print(f"  {i:2d}. {device['name']:20s} ({cat}) - 압력 장치")
+            elif device_type == 'heat_exchanger':
+                print(f"  {i:2d}. {device['name']:20s} (HeatExchanger) - 열교환기")
+        
+        ans = input("\n설계/재질을 변경할 장치 이름을 입력하세요 (없으면 엔터): ").strip()
         if not ans:
             break
         
         # 해당 장치 찾기
         device_info = None
-        for p in preview:
-            if p['name'] == ans:
-                device_info = p
+        for device in all_devices:
+            if device['name'] == ans:
+                device_info = device
                 break
         
         if not device_info:
             print(f"장치 '{ans}'를 찾을 수 없습니다.")
             continue
         
-        print(f"\n선택된 장치: {ans} ({device_info['category']})")
-        print(f"현재 타입: {device_info.get('selected_type', 'N/A')}")
-        print(f"현재 세부 타입: {device_info.get('selected_subtype', 'N/A')}")
+        device_type = device_info.get('device_type')
         
-        # 선택 가능한 타입과 세부 타입 표시
-        from equipment_costs import get_device_type_options
-        type_options = get_device_type_options(device_info['category'])
-        
-        if type_options:
-            print("\n사용 가능한 타입과 세부 타입:")
-            for main_type, subtypes in type_options.items():
-                print(f"  {main_type}: {', '.join(subtypes)}")
+        if device_type == 'pressure':
+            # 압력 장치 오버라이드 로직
+            print(f"\n선택된 장치: {ans} ({device_info['category']}) - 압력 장치")
+            print(f"현재 타입: {device_info.get('selected_type', 'N/A')}")
+            print(f"현재 세부 타입: {device_info.get('selected_subtype', 'N/A')}")
             
-            # 타입 변경
-            type_input = input("\n타입을 변경하시겠습니까? (y/n): ").strip().lower()
-            if type_input == 'y':
-                print("\n사용 가능한 타입:")
-                main_types = list(type_options.keys())
-                for i, t in enumerate(main_types, 1):
-                    print(f"  {i}. {t}")
+            # 선택 가능한 타입과 세부 타입 표시 (압력 조건 고려)
+            from equipment_costs import get_device_type_options
+            type_options = get_device_type_options(device_info['category'])
+            
+            # 압력 조건에 따른 타입 필터링
+            inlet_bar = device_info.get('inlet_bar')
+            outlet_bar = device_info.get('outlet_bar')
+            filtered_type_options = {}
+            
+            if inlet_bar is not None and outlet_bar is not None:
+                pressure_rise = outlet_bar - inlet_bar
                 
+                for main_type, subtypes in type_options.items():
+                    # 물리적 제약 조건 적용
+                    if main_type == 'fan' and outlet_bar > 1.17325:  # 0.16 barg = 1.17325 bara
+                        continue  # 팬은 출구 압력이 0.16 barg (1.17325 bara) 이하일 때만 가능
+                    elif main_type == 'turbine' and pressure_rise >= 0:
+                        continue  # 터빈은 압력 하강(음수)일 때만 가능
+                    elif main_type == 'compressor' and pressure_rise <= 0:
+                        continue  # 압축기는 압력 상승(양수)일 때만 가능
+                    
+                    filtered_type_options[main_type] = subtypes
+            
+            if filtered_type_options:
+                print("\n물리적 조건을 고려한 사용 가능한 타입과 세부 타입:")
+                for main_type, subtypes in filtered_type_options.items():
+                    print(f"  {main_type}: {', '.join(subtypes)}")
+                
+                # 제한된 타입이 있는지 확인
+                if not filtered_type_options:
+                    print(f"\n경고: {ans}의 압력 조건 (입구: {inlet_bar} bar, 출구: {outlet_bar} bar)에 맞는 타입이 없습니다.")
+                    print("기본 제안 타입을 사용합니다.")
+                else:
+                    # 타입 변경
+                    type_input = input("\n타입을 변경하시겠습니까? (y/n): ").strip().lower()
+                    if type_input == 'y':
+                        print("\n사용 가능한 타입:")
+                        main_types = list(filtered_type_options.keys())
+                        for i, t in enumerate(main_types, 1):
+                            print(f"  {i}. {t}")
+                        
+                        while True:
+                            try:
+                                type_choice = int(input("타입 번호를 선택하세요: ").strip())
+                                if 1 <= type_choice <= len(main_types):
+                                    selected_type = main_types[type_choice - 1]
+                                    type_overrides[ans] = selected_type
+                                    print(f"{ans}의 타입이 {selected_type}로 변경되었습니다.")
+                                    
+                                    # 세부 타입 선택
+                                    available_subtypes = filtered_type_options[selected_type]
+                                    print(f"\n사용 가능한 세부 타입:")
+                                    for i, st in enumerate(available_subtypes, 1):
+                                        print(f"  {i}. {st}")
+                                    
+                                    while True:
+                                        try:
+                                            subtype_choice = int(input("세부 타입 번호를 선택하세요: ").strip())
+                                            if 1 <= subtype_choice <= len(available_subtypes):
+                                                selected_subtype = available_subtypes[subtype_choice - 1]
+                                                subtype_overrides[ans] = selected_subtype
+                                                print(f"{ans}의 세부 타입이 {selected_subtype}로 변경되었습니다.")
+                                                break
+                                            else:
+                                                print("잘못된 번호입니다. 다시 입력해주세요.")
+                                        except ValueError:
+                                            print("숫자를 입력해주세요.")
+                                    break
+                                else:
+                                    print("잘못된 번호입니다. 다시 입력해주세요.")
+                            except ValueError:
+                                print("숫자를 입력해주세요.")
+            else:
+                print(f"\n경고: {ans}의 압력 조건에 맞는 타입이 없습니다. 기본 제안 타입을 사용합니다.")
+            
+            # 재질 변경
+            valid_materials = ['CS', 'SS', 'Ni', 'Cu', 'Cl', 'Ti', 'Fiberglass']
+            while True:
+                mat = input("변경할 재질을 입력하세요 (예: CS, SS, Ni, Cl, Ti, Fiberglass, 없으면 엔터): ").strip()
+                if not mat:  # 엔터만 입력한 경우
+                    break
+                elif mat in valid_materials:
+                    material_overrides[ans] = mat
+                    print(f"{ans}의 재질이 {mat}로 변경되었습니다.")
+                    break
+                else:
+                    print(f"잘못된 재질입니다. 사용 가능한 재질: {', '.join(valid_materials)}")
+                    print("다시 입력해주세요.")
+        
+        elif device_type == 'heat_exchanger':
+            # 열교환기 오버라이드 로직
+            print(f"\n선택된 장치: {ans} - 열교환기")
+            
+            # 타입 선택
+            hx_types = [
+                'fixed_tube','floating_head','bayonet','kettle_reboiler','double_pipe','multiple_pipe',
+                'scraped_wall','air_cooler','teflon_tube','spiral_tube_shell','spiral_plate','flat_plate'
+            ]
+            print("사용 가능한 HX 타입:")
+            for i,t in enumerate(hx_types,1):
+                print(f"  {i}. {t}")
+            
+            while True:
                 try:
-                    type_choice = int(input("타입 번호를 선택하세요: ").strip())
-                    if 1 <= type_choice <= len(main_types):
-                        selected_type = main_types[type_choice - 1]
-                        type_overrides[ans] = selected_type
-                        print(f"{ans}의 타입이 {selected_type}로 변경되었습니다.")
-                        
-                        # 세부 타입 선택
-                        available_subtypes = type_options[selected_type]
-                        print(f"\n사용 가능한 세부 타입:")
-                        for i, st in enumerate(available_subtypes, 1):
-                            print(f"  {i}. {st}")
-                        
-                        try:
-                            subtype_choice = int(input("세부 타입 번호를 선택하세요: ").strip())
-                            if 1 <= subtype_choice <= len(available_subtypes):
-                                selected_subtype = available_subtypes[subtype_choice - 1]
-                                subtype_overrides[ans] = selected_subtype
-                                print(f"{ans}의 세부 타입이 {selected_subtype}로 변경되었습니다.")
-                            else:
-                                print("잘못된 번호입니다.")
-                        except ValueError:
-                            print("숫자를 입력해주세요.")
+                    sel = int(input("HX 타입 번호: ").strip())
+                    if 1 <= sel <= len(hx_types):
+                        hx_type = hx_types[sel-1]
+                        break
                     else:
                         print("잘못된 번호입니다.")
                 except ValueError:
                     print("숫자를 입력해주세요.")
-        
-        # 재질 변경
-        mat = input("변경할 재질을 입력하세요 (예: CS, SS, Ni, Cl, Ti, Fiberglass, 없으면 엔터): ").strip()
-        if mat:
-            material_overrides[ans] = mat
-            print(f"{ans}의 재질이 {mat}로 변경되었습니다.")
+            
+            # 재질 옵션 표시
+            from equipment_costs import get_hx_material_options
+            guide = get_hx_material_options(hx_type)  # {shell:[], tube:[], notes:[]}
+            notes = guide.get('notes', [])
+            for m in notes:
+                print("- "+m)
+            shell_choice = None
+            tube_choice = None
+            if guide.get('shell') and guide['shell'][0] != '(선택 불가)' and guide['shell'][0] != '(내부 고정)':
+                print("가능한 쉘 재질:", ', '.join(guide['shell']))
+                shell_choice = input("쉘 재질 입력: ").strip()
+            elif guide.get('shell') and guide['shell'][0] == '(내부 고정)':
+                shell_choice = 'CS'
+            if guide.get('tube') and guide['tube'][0] != 'Teflon (fixed)':
+                print("가능한 튜브 재질:", ', '.join(guide['tube']))
+                tube_choice = input("튜브 재질 입력: ").strip()
+            
+            # U/LMTD/Area 오버라이드 입력
+            def _tryfloat(s):
+                try:
+                    return float(s)
+                except ValueError:
+                    return None
+            
+            q_w = device_info.get('q_w')
+            u = device_info.get('u_W_m2K')
+            lmtd = device_info.get('lmtd_K')
+            area = device_info.get('area_m2')
+            
+            if input("U 값을 변경하시겠습니까? (y/n): ").strip().lower()=='y':
+                u = _tryfloat(input("U [W/m2-K]: ").strip()) or u
+            if input("LMTD 값을 변경하시겠습니까? (y/n): ").strip().lower()=='y':
+                lmtd = _tryfloat(input("LMTD [K]: ").strip()) or lmtd
+            if input("면적(A) 값을 직접 지정하시겠습니까? (y/n): ").strip().lower()=='y':
+                area = _tryfloat(input("Area [m2]: ").strip()) or area
+            
+            # 비용 미리보기 계산 (현재는 미구현)
+            # costs = estimate_heat_exchanger_cost(...)
         
         # 변경사항이 있으면 프리뷰 다시 표시
         if ans in material_overrides or ans in type_overrides or ans in subtype_overrides:
             print("\n" + "="*60)
-            print("UPDATED PREVIEW: PRESSURE-DRIVEN DEVICES")
+            print("UPDATED PREVIEW: ALL EQUIPMENT")
             print("="*60)
             
             # 업데이트된 프리뷰 데이터 생성
@@ -1387,21 +1641,123 @@ try:
             
             # 업데이트된 프리뷰 출력
             print_preview_results(updated_preview, Application, power_unit, pressure_unit)
+            
+            # 세션 업데이트/생성
+            if session is None:
+                session = PreviewSession(
+                    aspen_file=aspen_Path,
+                    current_unit_set=current_unit_set,
+                    block_info=block_info,
+                    preview=preview,
+                    material_overrides=material_overrides,
+                    type_overrides=type_overrides,
+                    subtype_overrides=subtype_overrides,
+                )
+            else:
+                session.preview = preview
+                session.material_overrides = material_overrides
+                session.type_overrides = type_overrides
+                session.subtype_overrides = subtype_overrides
+
+    # 2) Build pre-extracted dict from block_info (freeze values)
+    pre_extracted = {}
+    
+    # 압력 장치 카테고리 정의
+    pressure_cats = {'Pump', 'Compr', 'MCompr'}
+    
+    # 압력 장치 데이터를 딕셔너리로 변환 (빠른 검색을 위해)
+    pressure_devices_dict = {}
+    for device in all_devices:
+        pressure_devices_dict[device['name']] = device
+    
+    # block_info의 모든 장치에 대해 pre_extracted 생성
+    for name, cat in block_info.items():
+        if cat in pressure_cats:
+            # 압력 장치 처리
+            device_data = pressure_devices_dict.get(name)
+            
+            if device_data:
+                # all_devices에서 데이터 추출
+                pre_extracted[name] = {
+                    'power_kilowatt': device_data.get('power_kilowatt'),
+                    'volumetric_flow_m3_s': device_data.get('volumetric_flow_m3_s'),
+                    'inlet_bar': device_data.get('inlet_bar'),
+                    'outlet_bar': device_data.get('outlet_bar'),
+                    'pressure_delta_bar': device_data.get('pressure_delta_bar'),
+                    'stage_data': device_data.get('stage_data'),
+                }
+            else:
+                # all_devices에 없는 경우 - 이는 오류 상황
+                raise ValueError(f"압력 장치 '{name}' ({cat})가 all_devices에 없습니다. 프리뷰 함수에 문제가 있습니다.")
+    # 저장 옵션
+    save_choice = input("현재 세션을 저장하시겠습니까? (y/n): ").strip().lower()
+    if save_choice == 'y':
+        try:
+            save_path = input("저장할 파일 경로(확장자 생략 가능, 기본 .pkl): ").strip()
+            if not save_path.lower().endswith('.pkl'):
+                save_path = save_path + '.pkl'
+            if session is None:
+                session = PreviewSession(
+                    aspen_file=aspen_Path,
+                    current_unit_set=current_unit_set,
+                    block_info=block_info,
+                    preview=preview,
+                    material_overrides=material_overrides,
+                    type_overrides=type_overrides,
+                    subtype_overrides=subtype_overrides,
+                )
+            session.save(save_path)
+            print(f"세션이 저장되었습니다: {save_path}")
+        except Exception as e:
+            print(f"세션 저장 실패: {e}")
+
     confirm = input("\n위 데이터/재질로 비용 계산을 진행할까요? (y/n): ").strip().lower()
     if confirm != 'y':
         print("사용자에 의해 계산이 취소되었습니다.")
         raise SystemExit(0)
 
     # 4) Run using pre-extracted data (no further COM reads)
-    pressure_device_costs, pressure_device_totals = calculate_pressure_device_costs_with_data(
-        pre_extracted=pre_extracted,
-        block_info=block_info,
-        material='CS',
-        cepci=CEPCIOptions(target_index=800.0),  # 2024년 CEPCI 인덱스
-        material_overrides=material_overrides,
-        type_overrides=type_overrides,
-        subtype_overrides=subtype_overrides,
-    )
+    # 변수 초기화
+    pressure_device_costs = []
+    pressure_device_totals = {"purchased": 0.0, "purchased_adj": 0.0, "bare_module": 0.0, "installed": 0.0}
+    
+    # 상세 모드가 아니라면 내부 디버그 출력 억제
+    if VERBOSITY >= 2:
+        pressure_device_costs, pressure_device_totals = calculate_pressure_device_costs_with_data(
+            pre_extracted=pre_extracted,
+            block_info=block_info,
+            material='CS',
+            cepci=CEPCIOptions(target_index=800.0),  # 2024년 CEPCI 인덱스
+            material_overrides=material_overrides,
+            type_overrides=type_overrides,
+            subtype_overrides=subtype_overrides,
+        )
+        
+        # 열교환기 비용 계산
+        from equipment_costs import calculate_heat_exchanger_costs_with_data
+        heat_exchanger_costs, heat_exchanger_totals = calculate_heat_exchanger_costs_with_data(
+            pre_extracted=pre_extracted,
+            block_info=block_info,
+            material='CS',
+            cepci=CEPCIOptions(target_index=800.0),
+            material_overrides=material_overrides,
+            type_overrides=type_overrides,
+            subtype_overrides=subtype_overrides,
+        )
+    else:
+        with open(os.devnull, 'w') as _null, contextlib.redirect_stdout(_null):
+            pressure_device_costs, pressure_device_totals = calculate_pressure_device_costs_with_data(
+                pre_extracted=pre_extracted,
+                block_info=block_info,
+                material='CS',
+                cepci=CEPCIOptions(target_index=800.0),  # 2024년 CEPCI 인덱스
+                material_overrides=material_overrides,
+                type_overrides=type_overrides,
+                subtype_overrides=subtype_overrides,
+            )
+
+        # 카테고리별 세부 출력 기능 제거됨
+    
     if pressure_device_costs:
         print("\n" + "="*60)
         print("CALCULATED PRESSURE DEVICE COSTS")
@@ -1409,23 +1765,28 @@ try:
         for item in pressure_device_costs:
             name = item.get('name')
             dtype = item.get('type')
-            installed = item.get('installed', 0.0)
             bare = item.get('bare_module', 0.0)
             
             if dtype == 'error':
                 error_msg = item.get('error', 'Unknown error')
                 print(f"{name} (error): {error_msg}")
             else:
-                print(f"{name} ({dtype}): Installed = {installed:,.2f} USD, Bare = {bare:,.2f} USD")
-        print(f"\nTotal Installed Cost for Pressure Devices: {pressure_device_totals.get('installed', 0.0):,.2f} USD")
-        print(f"Total Bare Module Cost for Pressure Devices: {pressure_device_totals.get('bare_module', 0.0):,.2f} USD")
+                print(f"{name} ({dtype}): Bare Module Cost = {bare:,.2f} USD")
+        print(f"\nTotal Bare Module Cost for Pressure Devices: {pressure_device_totals.get('bare_module', 0.0):,.2f} USD")
+        print("Note: Bare Module Cost includes installation costs")
         print("="*60)
     else:
         print("No pressure device costs calculated.")
-        
-    # 최종 캐시 통계 출력
-    final_cache_stats = get_cache_stats()
-    # 최종 캐시 통계 출력
+    
+    # 전체 총 비용 출력
+    total_cost = pressure_device_totals.get('bare_module', 0.0)
+    
+    print("\n" + "="*60)
+    print("TOTAL EQUIPMENT COSTS")
+    print("="*60)
+    print(f"Total Bare Module Cost: {total_cost:,.2f} USD")
+    print("Note: Bare Module Cost includes installation costs")
+    print("="*60)
     
 except Exception as e:
     print(f"Error during pressure device cost calculation/printing: {e}")
