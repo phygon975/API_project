@@ -1,0 +1,10 @@
+INPUT: Equipment_cost_estimation_aspen.inm
+MODNAME: apmain
+RUNID: Equipment_cost_estimation_aspen
+NEW_RUNID: Equipment_cost_estimation_aspen
+OLD_RUNID: Equipment_cost_estimation_aspen
+PDF: Equipment_cost_estimation_aspen.appdf
+USERNAME: zkjxc
+XMOD: C:\Program Files\AspenTech\Aspen Plus V15.0\Engine\xeq\apmain
+SPONLY:
+DBCONN: _1932qik.ads
