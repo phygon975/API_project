@@ -9,6 +9,7 @@ import sys
 
 import config
 import unit_converter
+import data_manager
 
 # =============================================================================
 # 데이터 모델
@@ -25,24 +26,78 @@ class CEPCIOptions:
 @dataclass
 class CostInputs:
     """비용 계산에 필요한 모든 입력 데이터를 담는 데이터 클래스"""
-    size_value: Optional[float] = None
-    size_unit: str = ""
-    pressure_bar: Optional[float] = None
-    pressure_delta_bar: Optional[float] = None
+    # 기본 정보
     material: str = "CS"
     selected_type: str = "default"
     selected_subtype: str = "default"
-    q_watt: Optional[float] = None
-    u_w_m2k: Optional[float] = None
-    lmtd_k: Optional[float] = None
-    tray_count: Optional[int] = None
-    stage_data: Optional[Dict[str, Any]] = None
     notes: Optional[str] = None
-    vessel_volume: Optional[float] = None
-    diameter: Optional[float] = None
-    height_or_length: Optional[float] = None
+    
+    # 장치별 전용 크기 필드들
+    # 펌퓨/압축기/터빈/팬
+    power_value: Optional[float] = None
+    power_unit: Optional[str] = None
+    
+    # 열교환기
+    heat_duty_value: Optional[float] = None
+    heat_duty_unit: Optional[str] = None
+    heat_transfer_area_value: Optional[float] = None
+    heat_transfer_area_unit: Optional[str] = None
+    
+    # 용기/반응기/탑
+    volume_value: Optional[float] = None
+    volume_unit: Optional[str] = None
+    
+    # 트레이/패킹
+    tray_count: Optional[int] = None
+    packing_volume_value: Optional[float] = None
+    packing_volume_unit: Optional[str] = None
+    
+    # 압력 관련 (단위 변환 가능)
+    inlet_pressure_value: Optional[float] = None
+    inlet_pressure_unit: Optional[str] = None
+    outlet_pressure_value: Optional[float] = None
+    outlet_pressure_unit: Optional[str] = None
+    pressure_drop_value: Optional[float] = None
+    pressure_drop_unit: Optional[str] = None
+    operating_pressure_value: Optional[float] = None
+    operating_pressure_unit: Optional[str] = None
+    
+    # 유량 관련
+    volumetric_flow_value: Optional[float] = None
+    volumetric_flow_unit: Optional[str] = None
+    mass_flow_value: Optional[float] = None
+    mass_flow_unit: Optional[str] = None
+    
+    # 열교환기 특화
+    heat_transfer_coefficient_value: Optional[float] = None
+    heat_transfer_coefficient_unit: Optional[str] = None
+    log_mean_temp_difference_value: Optional[float] = None
+    log_mean_temp_difference_unit: Optional[str] = None
+    
+    # 온도 관련
+    inlet_temperature_value: Optional[float] = None
+    inlet_temperature_unit: Optional[str] = None
+    outlet_temperature_value: Optional[float] = None
+    outlet_temperature_unit: Optional[str] = None
+    
+    # 기타 물리적 특성
+    diameter_value: Optional[float] = None
+    diameter_unit: Optional[str] = None
+    height_value: Optional[float] = None
+    height_unit: Optional[str] = None
+    
+    # 시간 관련
+    residence_time_hours_value: Optional[float] = None
+    residence_time_minutes_value: Optional[float] = None
+    residence_time_seconds_value: Optional[float] = None
+    
+    # 다단 압축기 특화
+    stage_data: Optional[Dict[str, Any]] = None
+    
+    # 열교환기 재질 특화
     shell_material: Optional[str] = None
     tube_material: Optional[str] = None
+    
     
 # =============================================================================
 # 내부 계산 헬퍼 함수들
@@ -62,6 +117,12 @@ def _eval_log_quadratic_cost(size_value: float, coeffs: dict) -> float:
     logS = math.log10(size_value)
     logC = coeffs["k1"] + coeffs["k2"] * logS + coeffs["k3"] * (logS ** 2)
     return 10.0 ** logC
+
+def _push(steps: List[str], msg: str) -> None:
+    try:
+        steps.append(msg)
+    except Exception:
+        pass
 
 def _resolve_bm(equipment_type: str, subtype: str, material: str, fm: float, fp: float) -> float:
     """Bare Module Factor를 결정합니다."""
@@ -187,13 +248,19 @@ def _sum_costs(parts: List[Dict]) -> Dict[str, float]:
 
 def estimate_pump_cost(inputs: CostInputs, cepci: CEPCIOptions, _split: bool = True) -> Dict[str, Any]:
     """펌프 비용을 계산합니다."""
-    power_kw = inputs.size_value
     subtype = inputs.selected_subtype
     settings = config.get_equipment_setting("pump", subtype)
     coeffs = settings.get("correlation_coeffs")
+    debug_steps: List[str] = []
+    
+    if inputs.power_value is None or inputs.power_unit is None:
+        raise ValueError(f"Missing power value or power unit for pump ({subtype})")
+    
+    power_kw = unit_converter.convert_units(inputs.power_value, inputs.power_unit, 'kW', 'POWER')
+    _push(debug_steps, f"size S=Power={inputs.power_value} {inputs.power_unit} → {power_kw:.2f} kW")
 
-    if power_kw is None or power_kw <= 0:
-        raise ValueError(f"Missing or invalid power for pump ({subtype})")
+    if power_kw <= 0:
+        raise ValueError(f"Invalid power after conversion for pump ({subtype})")
     
     max_size_range = settings.get("size_ranges", [{}])[0]
     max_size = max_size_range.get("max")
@@ -204,24 +271,39 @@ def estimate_pump_cost(inputs: CostInputs, cepci: CEPCIOptions, _split: bool = T
         parts = []
         for _ in range(int(num_units)):
             sub_inputs = CostInputs(
-                size_value=power_per_unit,
-                size_unit=inputs.size_unit,
-                pressure_bar=inputs.pressure_bar,
+                power_value=power_per_unit * 1000.0,  # watt로 변환
+                power_unit=inputs.power_unit,
                 material=inputs.material,
-                selected_subtype=subtype
+                selected_subtype=subtype,
+                operating_pressure_value=inputs.operating_pressure_value,
+                operating_pressure_unit=inputs.operating_pressure_unit
             )
             parts.append(estimate_pump_cost(sub_inputs, cepci, _split=False))
         return _sum_costs(parts)
 
+    _push(debug_steps, f"logC(S={power_kw:.2f}) = {coeffs['k1']:.4f} + {coeffs['k2']:.4f}·log10(S) + {coeffs['k3']:.4f}·log10(S)^2")
     purchased_base = _eval_log_quadratic_cost(power_kw, coeffs)
+    _push(debug_steps, f"Purchased base (2001, CEPCI=397) = {purchased_base:,.2f}")
     purchased_adj = _adjust_cost_to_index(purchased_base, cepci.base_index, cepci.target_index)
+    _push(debug_steps, f"CEPCI adjusted (target={cepci.target_index}) = {purchased_adj:,.2f}")
     
     b1, b2 = settings.get("bm_factors_b1b2")
     fm = _resolve_material_factor("pump", subtype, inputs.material)
-    fp = _resolve_pressure_factor("pump", subtype, inputs.pressure_bar, "gauge")
     
+    # 압력 계산
+    if inputs.operating_pressure_value is None or inputs.operating_pressure_unit is None:
+        raise ValueError(f"Missing operating pressure value or unit for pump ({subtype})")
+    
+    pressure_bar = unit_converter.convert_units(inputs.operating_pressure_value, inputs.operating_pressure_unit, 'bar', 'PRESSURE')
+    _push(debug_steps, f"Operating pressure = {inputs.operating_pressure_value} {inputs.operating_pressure_unit} → {pressure_bar:.2f} bar")
+    
+    fp = _resolve_pressure_factor("pump", subtype, pressure_bar, "gauge")
+    
+    _push(debug_steps, f"Factors: Fm={fm:.2f} ({inputs.material}), Fp={fp:.2f}")
     effective_bm = b1 + b2 * fm * fp
+    _push(debug_steps, f"BM = {b1} + {b2}·Fm·Fp = {effective_bm:.3f}")
     bare_module_cost = purchased_adj * effective_bm
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -230,17 +312,24 @@ def estimate_pump_cost(inputs: CostInputs, cepci: CEPCIOptions, _split: bool = T
         "bm_factor": effective_bm,
         "material_factor": fm,
         "pressure_factor": fp,
-        "size_value": power_kw
+        "size_value": power_kw,
+        "debug_steps": debug_steps
     }
 
 def estimate_compressor_cost(inputs: CostInputs, cepci: CEPCIOptions, _split: bool = True) -> Dict[str, Any]:
-    power_kw = inputs.size_value
     subtype = inputs.selected_subtype
     settings = config.get_equipment_setting("compressor", subtype)
     coeffs = settings.get("correlation_coeffs")
+    debug_steps: List[str] = []
 
-    if power_kw is None or power_kw <= 0:
-        raise ValueError(f"Missing or invalid power for compressor ({subtype})")
+    if inputs.power_value is None or inputs.power_unit is None:
+        raise ValueError(f"Missing power value or power unit for compressor ({subtype})")
+    
+    power_kw = unit_converter.convert_units(inputs.power_value, inputs.power_unit, 'kW', 'POWER')
+    _push(debug_steps, f"size S=Power={inputs.power_value} {inputs.power_unit} → {power_kw} kW")
+
+    if power_kw <= 0:
+        raise ValueError(f"Invalid power after conversion for compressor ({subtype})")
     
     max_size_range = settings.get("size_ranges", [{}])[0]
     max_size = max_size_range.get("max")
@@ -251,21 +340,27 @@ def estimate_compressor_cost(inputs: CostInputs, cepci: CEPCIOptions, _split: bo
         parts = []
         for _ in range(int(num_units)):
             sub_inputs = CostInputs(
-                size_value=power_per_unit,
-                size_unit=inputs.size_unit,
+                power_value=power_per_unit * 1000.0,
+                power_unit=inputs.power_unit,
                 material=inputs.material,
                 selected_subtype=subtype
             )
             parts.append(estimate_compressor_cost(sub_inputs, cepci, _split=False))
         return _sum_costs(parts)
 
+    _push(debug_steps, f"logC with S={power_kw}")
     purchased_base = _eval_log_quadratic_cost(power_kw, coeffs)
+    _push(debug_steps, f"Purchased base (2001, CEPCI=397) = {purchased_base:,.2f}")
     purchased_adj = _adjust_cost_to_index(purchased_base, cepci.base_index, cepci.target_index)
+    _push(debug_steps, f"Cost adjusted = {purchased_adj:.2f}")
     
     fixed_bm_factors = settings.get("bm_factors_fixed")
     effective_bm = fixed_bm_factors.get(inputs.material, fixed_bm_factors.get(config.DEFAULT_MATERIAL))
+    _push(debug_steps, f"BM = fixed(material={inputs.material}) = {effective_bm:.3f}")
     
     bare_module_cost = purchased_adj * effective_bm
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
+    _push(debug_steps, f"BM={effective_bm:.3f}; Bare Module Cost = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -274,28 +369,42 @@ def estimate_compressor_cost(inputs: CostInputs, cepci: CEPCIOptions, _split: bo
         "bm_factor": effective_bm,
         "material_factor": 1.0,
         "pressure_factor": 1.0,
-        "size_value": power_kw
+        "size_value": power_kw,
+        "debug_steps": debug_steps
     }
 
 def estimate_fan_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, Any]:
-    flow_m3_s = inputs.size_value
     subtype = inputs.selected_subtype
     settings = config.get_equipment_setting("fan", subtype)
     coeffs = settings.get("correlation_coeffs")
+    debug_steps: List[str] = []
 
-    if flow_m3_s is None or flow_m3_s <= 0:
-        raise ValueError(f"Missing or invalid flowrate for fan ({subtype})")
+    if inputs.volumetric_flow_value is None or inputs.volumetric_flow_unit is None:
+        raise ValueError(f"Missing volumetric flow value or unit for fan ({subtype})")
     
+    flow_m3_s = unit_converter.convert_units(inputs.volumetric_flow_value, inputs.volumetric_flow_unit, 'm3/s', 'VOLUME-FLOW')
+    _push(debug_steps, f"S=Volumetric flow={inputs.volumetric_flow_value} {inputs.volumetric_flow_unit} → {flow_m3_s:.2f} m³/s")
+
+    if flow_m3_s <= 0:
+        raise ValueError(f"Invalid flow after conversion for fan ({subtype})")
+    
+    _push(debug_steps, f"logC(S={flow_m3_s:.2f}) = {coeffs['k1']:.4f} + {coeffs['k2']:.4f}·log10(S) + {coeffs['k3']:.4f}·log10(S)^2")
     purchased_base = _eval_log_quadratic_cost(flow_m3_s, coeffs)
+    _push(debug_steps, f"Purchased base (2001, CEPCI=397) = {purchased_base:,.2f}")
     purchased_adj = _adjust_cost_to_index(purchased_base, cepci.base_index, cepci.target_index)
+    _push(debug_steps, f"CEPCI adjusted (target={cepci.target_index}) = {purchased_adj:,.2f}")
     
     fixed_bm_factors = settings.get("bm_factors_fixed")
     effective_bm = fixed_bm_factors.get(inputs.material, fixed_bm_factors.get(config.DEFAULT_MATERIAL))
     
-    fp = _resolve_pressure_factor("fan", subtype, inputs.pressure_delta_bar, "pressure_difference")
+    if inputs.pressure_drop_value is None or inputs.pressure_drop_unit is None:
+        raise ValueError(f"Missing pressure drop value or unit for fan ({subtype})")
     
+    fp = _resolve_pressure_factor("fan", subtype, inputs.pressure_drop_value, "pressure_difference")
     effective_bm_with_fp = effective_bm * fp
+    _push(debug_steps, f"BM = fixed(material={inputs.material})·Fp = {effective_bm:.3f}·{fp:.2f} = {effective_bm_with_fp:.3f}")
     bare_module_cost = purchased_adj * effective_bm_with_fp
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm_with_fp:.3f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -304,99 +413,161 @@ def estimate_fan_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, Any]
         "bm_factor": effective_bm_with_fp,
         "material_factor": 1.0,
         "pressure_factor": fp,
-        "size_value": flow_m3_s
+        "size_value": flow_m3_s,
+        "debug_steps": debug_steps
     }
 
-def estimate_mcompr_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, Any]:
-    total_power_kw = inputs.size_value
+def estimate_mcompr_cost(inputs: CostInputs, cepci: CEPCIOptions, Application=None) -> Dict[str, Any]:
     stage_data = inputs.stage_data
     material = inputs.material
+    debug_steps: List[str] = []
     
-    if total_power_kw is None or not stage_data:
-        raise ValueError("Missing power or stage data for multi-stage compressor")
+    if not stage_data:
+        raise ValueError("Missing stage data for multi-stage compressor")
         
     total_costs = {"purchased_base": 0.0, "purchased_adj": 0.0, "bare_module_cost": 0.0}
+    total_compressor_cost = 0.0
+    total_intercooler_cost = 0.0
+    total_power_kw = 0.0
     
+    # 각 스테이지별로 압축기 비용 계산
     for stage_num, data in stage_data.items():
-        stage_power = data.get("power_kilowatt")
-        stage_pressure = data.get("outlet_pressure_bar")
+        power_value = data.get("power_value")
+        power_unit = data.get("power_unit")
         
-        if stage_power is not None:
-            stage_inputs = CostInputs(
-                size_value=stage_power,
-                material=material,
-                selected_subtype="centrifugal"
-            )
-            comp_costs = estimate_compressor_cost(stage_inputs, cepci)
-            for k in total_costs:
-                total_costs[k] += comp_costs[k]
-                
-        # 인터쿨러 비용 계산 (단계 간 냉각기)
-        if stage_num < len(stage_data):
+        if power_value is None or power_unit is None:
+            raise ValueError(f"Missing power value or unit for stage {stage_num}")
+            
+        # 파워를 kW로 단위 변환
+        power_kw = unit_converter.convert_units(power_value, power_unit, 'kW', 'POWER')
+        total_power_kw += power_kw
+        
+        # 스테이지 압축기 비용 계산 - 기존 함수 사용
+        stage_inputs = CostInputs(
+            material=material,
+            selected_subtype="centrifugal",
+            power_value=power_value,
+            power_unit=power_unit,
+            inlet_pressure_value=data.get("inlet_pressure_value"),
+            inlet_pressure_unit=data.get("inlet_pressure_unit"),
+            outlet_pressure_value=data.get("outlet_pressure_value"), 
+            outlet_pressure_unit=data.get("outlet_pressure_unit"),
+            operating_pressure_value=data.get("outlet_pressure_value"),
+            operating_pressure_unit=data.get("outlet_pressure_unit"),
+            pressure_drop_value=data.get("pressure_drop_value"),
+            pressure_drop_unit=data.get("pressure_drop_unit"),
+            volumetric_flow_value=data.get("volumetric_flow_value"),
+            volumetric_flow_unit=data.get("volumetric_flow_unit")
+        )
+        
+        comp_costs = estimate_compressor_cost(stage_inputs, cepci)
+        _push(debug_steps, f"Stage {stage_num} Compressor:")
+        # 압축기 상세 계산 과정을 debug_steps에 추가
+        for step in comp_costs.get('debug_steps', []):
+            _push(debug_steps, f"    - {step}")
+        for k in total_costs:
+            total_costs[k] += comp_costs[k]
+        total_compressor_cost += comp_costs.get('bare_module_cost', 0.0)
+        
+        # 인터쿨러 비용 계산 - data_manager에서 계산된 LMTD 사용
+        q_value = data.get("q_value")
+        q_unit = data.get("q_unit")
+        intercooler_lmtd = data.get("intercooler_lmtd")
+        
+        if q_value is not None and q_unit is not None and intercooler_lmtd is not None:
             try:
-                Q_watt = data.get("q_watt")
-                if Q_watt is None:
-                    continue
+                # 인터쿨러는 냉각이므로 Q값이 음수일 때 양수로 변환
+                abs_q_value = abs(q_value)
                 
-                T_h_in = data.get("B_TEMP_K")
-                T_h_out = data.get("COOL_TEMP_K")
-                
-                if T_h_in is None or T_h_out is None:
-                    continue
-                
-                T_c_in = T_h_out - 10
-                T_c_out = T_h_out
-                
-                delta_T1 = T_h_in - T_c_out
-                delta_T2 = T_h_out - T_c_in
-                
-                if delta_T1 <= 0 or delta_T2 <= 0:
-                    lmtd_k = 0
-                else:
-                    lmtd_k = (delta_T1 - delta_T2) / math.log(delta_T1 / delta_T2)
-                
-                if lmtd_k == 0:
-                    continue
-
+                # 인터쿨러 비용 계산 - 기존 열교환기 함수 사용
                 intercooler_inputs = CostInputs(
-                    size_value=None,
-                    q_watt=Q_watt,
-                    u_w_m2k=850.0,
-                    lmtd_k=lmtd_k,
                     material=material,
+                    selected_type="heat_exchanger",
                     selected_subtype="fixed_tube",
                     shell_material=config.DEFAULT_MATERIAL,
                     tube_material=config.DEFAULT_MATERIAL,
+                    heat_duty_value=abs_q_value,
+                    heat_duty_unit=q_unit,
+                    heat_transfer_coefficient_value=850.0,
+                    heat_transfer_coefficient_unit="Watt/sqm-K",
+                    log_mean_temp_difference_value=intercooler_lmtd,
+                    log_mean_temp_difference_unit="K"
                 )
                 intercooler_costs = estimate_heat_exchanger_cost(intercooler_inputs, cepci)
+                _push(debug_steps, f"Stage {stage_num} Intercooler:")
+                # 인터쿨러 상세 계산 과정을 debug_steps에 추가
+                for step in intercooler_costs.get('debug_steps', []):
+                    _push(debug_steps, f"    - {step}")
                 for k in total_costs:
                     total_costs[k] += intercooler_costs[k]
-            except Exception:
-                continue
+                total_intercooler_cost += intercooler_costs.get('bare_module_cost', 0.0)
+                        
+            except Exception as e:
+                _push(debug_steps, f"Stage {stage_num} intercooler calculation failed: {str(e)} - proceeding without intercooler")
+                continue  # 인터쿨러 계산 실패는 무시
 
-    return total_costs
+    # 다단 압축기 총 비용 계산 과정 추가
+    _push(debug_steps, f"Total: Compressor=${total_compressor_cost:,.2f} + Intercooler=${total_intercooler_cost:,.2f} = ${total_costs['bare_module_cost']:,.2f}")
+
+    return {
+        "purchased_base": total_costs["purchased_base"],
+        "purchased_adj": total_costs["purchased_adj"],
+        "bare_module_cost": total_costs["bare_module_cost"],
+        "material_factor": 1.0,
+        "pressure_factor": 1.0,
+        "size_value": total_power_kw,
+        "debug_steps": debug_steps
+    }
 
 def estimate_heat_exchanger_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, Any]:
-    area_sqm = inputs.size_value
     subtype = inputs.selected_subtype
     settings = config.get_equipment_setting("heat_exchanger", subtype)
     coeffs = settings.get("correlation_coeffs")
+    
+    debug_steps: List[str] = []
+    # 전용 필드 직접 사용
+    area_value = inputs.heat_transfer_area_value
+    area_unit = inputs.heat_transfer_area_unit
+    
+    # 면적이 직접 주어진 경우 SI 변환
+    area_sqm = None
+    if area_value is not None and area_unit:
+        try:
+            area_sqm = unit_converter.convert_units(area_value, area_unit, 'sqm', 'AREA')
+        except Exception as e:
+            raise ValueError(f"Unit conversion error for heat transfer area ({subtype}): {e}")
 
     if area_sqm is None:
-        missing = []
-        if inputs.q_watt is None:
-            missing.append("Q")
-        if inputs.u_w_m2k is None:
-            missing.append("U")
-        if inputs.lmtd_k is None:
-            missing.append("LMTD")
-        if missing:
-            raise ValueError(f"Missing inputs for heat exchanger ({subtype}): {', '.join(missing)}")
+        # 원시값과 단위를 사용하여 면적 계산 (전용 필드 우선 사용)
+        heat_duty_value = inputs.heat_duty_value
+        heat_duty_unit = inputs.heat_duty_unit
+        htc_value = inputs.heat_transfer_coefficient_value
+        htc_unit = inputs.heat_transfer_coefficient_unit
+        lmtd_value = inputs.log_mean_temp_difference_value
+        lmtd_unit = inputs.log_mean_temp_difference_unit
         
-        if inputs.u_w_m2k == 0 or inputs.lmtd_k == 0:
-             raise ValueError(f"U or LMTD is zero for heat exchanger ({subtype})")
+        if heat_duty_value is None or heat_duty_unit is None:
+            raise ValueError(f"Missing heat duty value or unit for heat exchanger ({subtype})")
+        if htc_value is None or htc_unit is None:
+            raise ValueError(f"Missing heat transfer coefficient value or unit for heat exchanger ({subtype})")
+        if lmtd_value is None or lmtd_unit is None:
+            raise ValueError(f"Missing log mean temperature difference value or unit for heat exchanger ({subtype})")
         
-        area_sqm = inputs.q_watt / (inputs.u_w_m2k * inputs.lmtd_k)
+        try:
+            q_watt = unit_converter.convert_units(heat_duty_value, heat_duty_unit, 'Watt', 'ENTHALPY-FLO')
+            u_si = unit_converter.convert_units(htc_value, htc_unit, 'Watt/sqm-K', 'HEAT-TRANS-C')
+            lmtd_si = unit_converter.convert_units(lmtd_value, lmtd_unit, 'K', 'DELTA-T')
+            _push(debug_steps, f"Q={heat_duty_value:.2f} {heat_duty_unit} → {q_watt:.2f} W, U={htc_value:.2f} {htc_unit} → {u_si:.2f} W/m²·K, ΔTlm={lmtd_value:.2f} {lmtd_unit} → {lmtd_si:.2f} K")
+        except Exception as e:
+            raise ValueError(f"Unit conversion error for heat exchanger ({subtype}): {e}")
+        
+        if u_si is None or u_si == 0 or lmtd_si is None or lmtd_si == 0:
+            raise ValueError(f"U or LMTD is zero after unit conversion for heat exchanger ({subtype})")
+        
+        # Watt 단위의 열부하를 면적 계산에 사용: A = Q / (U × ΔT)
+        # 여기서 Q는 Watt (J/sec), U는 Watt/sqm-K, ΔT는 K
+        area_sqm = q_watt / (u_si * lmtd_si)
+        _push(debug_steps, f"A = Q/(U·ΔTlm) = {q_watt:.2f}/({u_si:.2f}·{lmtd_si:.2f}) = {area_sqm:.4f} m²")
     
     if area_sqm <= 0:
         raise ValueError(f"Invalid calculated area for heat exchanger ({subtype})")
@@ -410,25 +581,34 @@ def estimate_heat_exchanger_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dic
         parts = []
         for _ in range(int(num_units)):
             sub_inputs = CostInputs(
-                size_value=area_per_unit,
+                heat_transfer_area_value=area_per_unit,
+                heat_transfer_area_unit="sqm",
                 material=inputs.material,
-                selected_subtype=subtype
+                selected_subtype=subtype,
+                shell_material=inputs.shell_material,
+                tube_material=inputs.tube_material
             )
             parts.append(estimate_heat_exchanger_cost(sub_inputs, cepci))
         return _sum_costs(parts)
 
+    _push(debug_steps, f"logC(S={area_sqm:.2f}) = {coeffs['k1']:.4f} + {coeffs['k2']:.4f}·log10(S) + {coeffs['k3']:.4f}·log10(S)^2")
     purchased_base = _eval_log_quadratic_cost(area_sqm, coeffs)
+    _push(debug_steps, f"Purchased base (2001, CEPCI=397) = {purchased_base:,.2f}")
     purchased_adj = _adjust_cost_to_index(purchased_base, cepci.base_index, cepci.target_index)
+    _push(debug_steps, f"CEPCI adjusted (target={cepci.target_index}) = {purchased_adj:,.2f}")
 
     fm = _resolve_material_factor(
         "heat_exchanger", subtype, inputs.material,
         shell_material=inputs.shell_material, tube_material=inputs.tube_material
     )
-    fp = _resolve_pressure_factor("heat_exchanger", subtype, inputs.pressure_bar, "gauge")
+    # 압력 인자는 열교환기에서는 기본값 사용
+    fp = 1.0  # 열교환기는 일반적으로 낮은 압력
     
     b1, b2 = settings.get("bm_factors_b1b2")
+    _push(debug_steps, f"Fm={fm:.2f} (Shell={inputs.shell_material}, Tube={inputs.tube_material}), Fp={fp:.2f}; BM = {b1} + {b2}·Fm·Fp")
     effective_bm = b1 + b2 * fm * fp
     bare_module_cost = purchased_adj * effective_bm
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -437,18 +617,45 @@ def estimate_heat_exchanger_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dic
         "bm_factor": effective_bm,
         "material_factor": fm,
         "pressure_factor": fp,
-        "size_value": area_sqm
+        "size_value": area_sqm,
+        "debug_steps": debug_steps
     }
 
 def estimate_vessel_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, Any]:
-    volume_cum = inputs.size_value
-    diameter_m = inputs.diameter
     subtype = inputs.selected_subtype
     settings = config.get_equipment_setting("vessel", subtype)
     coeffs = settings.get("correlation_coeffs")
+    
+    # 전용 필드 직접 사용
+    volume_value = inputs.volume_value
+    volume_unit = inputs.volume_unit
+    diameter_value = inputs.diameter_value
+    diameter_unit = inputs.diameter_unit
 
+    if volume_value is None or volume_unit is None:
+        raise ValueError(f"Missing volume value or unit for vessel ({subtype})")
+    
+    try:
+        volume_cum = unit_converter.convert_units(volume_value, volume_unit, 'cum', 'VOLUME')
+    except Exception as e:
+        raise ValueError(f"Unit conversion error for vessel volume ({subtype}): {e}")
+
+    debug_steps: List[str] = []
+    _push(debug_steps, f"S=Volume={volume_value} {volume_unit} → {volume_cum} m³")
     if volume_cum is None or volume_cum <= 0:
-        raise ValueError(f"Missing or invalid volume for vessel ({subtype})")
+        raise ValueError(f"Invalid volume after conversion for vessel ({subtype})")
+    
+    # 지름 변환 (필요한 경우)
+    diameter_m = diameter_value
+    if diameter_value is not None and inputs.diameter_unit is not None:
+        try:
+            # 지름은 길이 단위이므로 LENGTH 타입으로 변환
+            # 지름은 일반적으로 면적의 평방근이므로 길이 단위로 변환할 수 있음
+            diameter_area_sqm = unit_converter.convert_units(diameter_value, inputs.diameter_unit, 'sqm', 'AREA')
+            diameter_m = diameter_area_sqm ** 0.5 if diameter_area_sqm else None
+        except Exception as e:
+            print(f"Warning: Could not convert diameter for vessel ({subtype}): {e}")
+            diameter_m = diameter_value
 
     max_size_range = settings.get("size_ranges", [{}])[0]
     max_size = max_size_range.get("max")
@@ -459,23 +666,42 @@ def estimate_vessel_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, A
         parts = []
         for _ in range(int(num_units)):
             sub_inputs = CostInputs(
-                size_value=volume_per_unit,
+                volume_value=volume_per_unit,
+                volume_unit="cum",
                 material=inputs.material,
                 selected_subtype=subtype,
-                diameter=diameter_m
+                diameter_value=diameter_m,
+                diameter_unit="m"
             )
             parts.append(estimate_vessel_cost(sub_inputs, cepci))
         return _sum_costs(parts)
 
+    _push(debug_steps, f"logC(S={volume_cum:.2f}) = {coeffs['k1']:.4f} + {coeffs['k2']:.4f}·log10(S) + {coeffs['k3']:.4f}·log10(S)^2")
     purchased_base = _eval_log_quadratic_cost(volume_cum, coeffs)
+    _push(debug_steps, f"Purchased base (2001, CEPCI=397) = {purchased_base:,.2f}")
     purchased_adj = _adjust_cost_to_index(purchased_base, cepci.base_index, cepci.target_index)
+    _push(debug_steps, f"CEPCI adjusted (target={cepci.target_index}) = {purchased_adj:,.2f}")
     
     fm = _resolve_material_factor("vessel", subtype, inputs.material)
-    fp = _resolve_pressure_factor("vessel", subtype, inputs.pressure_bar, "gauge", diameter=diameter_m)
+    
+    # 압력 계산
+    pressure_value = inputs.operating_pressure_value
+    pressure_unit = inputs.operating_pressure_unit
+    pressure_bar = None
+    
+    if pressure_value is not None and pressure_unit is not None:
+        try:
+            pressure_bar = unit_converter.convert_units(pressure_value, pressure_unit, 'bar', 'PRESSURE')
+        except Exception as e:
+            print(f"Warning: Could not convert pressure for vessel ({subtype}): {e}")
+    
+    fp = _resolve_pressure_factor("vessel", subtype, pressure_bar, "gauge", diameter=diameter_m)
     
     b1, b2 = settings.get("bm_factors_b1b2")
+    _push(debug_steps, f"Fm={fm:.3f}, Fp={fp:.3f}; BM = {b1} + {b2}·Fm·Fp")
     effective_bm = b1 + b2 * fm * fp
     bare_module_cost = purchased_adj * effective_bm
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -484,17 +710,31 @@ def estimate_vessel_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, A
         "bm_factor": effective_bm,
         "material_factor": fm,
         "pressure_factor": fp,
-        "size_value": volume_cum
+        "size_value": volume_cum,
+        "debug_steps": debug_steps
     }
 
 def estimate_reactor_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, Any]:
-    volume_cum = inputs.size_value
     subtype = inputs.selected_subtype
     settings = config.get_equipment_setting("reactor", subtype)
     coeffs = settings.get("correlation_coeffs")
+    
+    # 전용 필드 직접 사용
+    volume_value = inputs.volume_value
+    volume_unit = inputs.volume_unit
 
+    debug_steps: List[str] = []
+    if volume_value is None or volume_unit is None:
+        raise ValueError(f"Missing volume value or unit for reactor ({subtype})")
+    
+    try:
+        volume_cum = unit_converter.convert_units(volume_value, volume_unit, 'cum', 'VOLUME')
+    except Exception as e:
+        raise ValueError(f"Unit conversion error for reactor volume ({subtype}): {e}")
+
+    _push(debug_steps, f"S=Volume={volume_value} {volume_unit} → {volume_cum} m³")
     if volume_cum is None or volume_cum <= 0:
-        raise ValueError(f"Missing or invalid volume for reactor ({subtype})")
+        raise ValueError(f"Invalid volume after conversion for reactor ({subtype})")
 
     max_size_range = settings.get("size_ranges", [{}])[0]
     max_size = max_size_range.get("max")
@@ -505,20 +745,25 @@ def estimate_reactor_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, 
         parts = []
         for _ in range(int(num_units)):
             sub_inputs = CostInputs(
-                size_value=volume_per_unit,
+                volume_value=volume_per_unit,
+                volume_unit="cum",
                 material=inputs.material,
                 selected_subtype=subtype,
             )
             parts.append(estimate_reactor_cost(sub_inputs, cepci))
         return _sum_costs(parts)
 
+    _push(debug_steps, f"logC(S={volume_cum:.2f}) = {coeffs['k1']:.4f} + {coeffs['k2']:.4f}·log10(S) + {coeffs['k3']:.4f}·log10(S)^2")
     purchased_base = _eval_log_quadratic_cost(volume_cum, coeffs)
+    _push(debug_steps, f"Purchased base (2001) = {purchased_base:.2f}")
     purchased_adj = _adjust_cost_to_index(purchased_base, cepci.base_index, cepci.target_index)
+    _push(debug_steps, f"CEPCI adjusted (target={cepci.target_index}) = {purchased_adj:,.2f}")
     
     fixed_bm_factors = settings.get("bm_factors_fixed")
     effective_bm = fixed_bm_factors.get(inputs.material, fixed_bm_factors.get(config.DEFAULT_MATERIAL))
     
     bare_module_cost = purchased_adj * effective_bm
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -527,11 +772,12 @@ def estimate_reactor_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, 
         "bm_factor": effective_bm,
         "material_factor": 1.0,
         "pressure_factor": 1.0,
-        "size_value": volume_cum
+        "size_value": volume_cum,
+        "debug_steps": debug_steps
     }
 
 
-def calculate_all_costs_with_data(all_device_data: List[Dict], cepci: CEPCIOptions) -> Dict[str, Any]:
+def calculate_all_costs_with_data(all_device_data: List[Dict], cepci: CEPCIOptions, Application=None) -> Dict[str, Any]:
     results = []
     total_bare_module_cost = 0.0
     
@@ -545,20 +791,34 @@ def calculate_all_costs_with_data(all_device_data: List[Dict], cepci: CEPCIOptio
             
         try:
             inputs = CostInputs(
-                size_value=device.get("size_value"),
-                size_unit=device.get("size_unit"),
-                pressure_bar=device.get("outlet_bar"),
-                pressure_delta_bar=device.get("pressure_delta_bar"),
                 material=device.get("material", config.DEFAULT_MATERIAL),
                 selected_type=device.get("selected_type"),
                 selected_subtype=device.get("selected_subtype"),
-                q_watt=device.get("q_watt"),
-                u_w_m2k=device.get("u_w_m2k"),
-                lmtd_k=device.get("lmtd_k"),
-                tray_count=device.get("tray_count"),
+                power_value=device.get("power_value"),
+                power_unit=device.get("power_unit"),
+                heat_duty_value=device.get("heat_duty_value"),
+                heat_duty_unit=device.get("heat_duty_unit"),
+                heat_transfer_coefficient_value=device.get("heat_transfer_coefficient_value"),
+                heat_transfer_coefficient_unit=device.get("heat_transfer_coefficient_unit"),
+                log_mean_temp_difference_value=device.get("log_mean_temp_difference_value"),
+                log_mean_temp_difference_unit=device.get("log_mean_temp_difference_unit"),
+                volume_value=device.get("volume_value"),
+                volume_unit=device.get("volume_unit"),
+                inlet_pressure_value=device.get("inlet_pressure_value"),
+                inlet_pressure_unit=device.get("inlet_pressure_unit"),
+                outlet_pressure_value=device.get("outlet_pressure_value"),
+                outlet_pressure_unit=device.get("outlet_pressure_unit"),
+                operating_pressure_value=device.get("operating_pressure_value"),
+                operating_pressure_unit=device.get("operating_pressure_unit"),
+                pressure_drop_value=device.get("pressure_drop_value"),
+                pressure_drop_unit=device.get("pressure_drop_unit"),
+                volumetric_flow_value=device.get("volumetric_flow_value"),
+                volumetric_flow_unit=device.get("volumetric_flow_unit"),
+                mass_flow_value=device.get("mass_flow_value"),
+                mass_flow_unit=device.get("mass_flow_unit"),
+                residence_time_hours_value=device.get("residence_time_hours_value"),
+                residence_time_minutes_value=device.get("residence_time_minutes_value"),
                 stage_data=device.get("stage_data"),
-                diameter=device.get("diameter"),
-                height_or_length=device.get("height_or_length"),
                 shell_material=device.get("shell_material"),
                 tube_material=device.get("tube_material"),
             )
@@ -574,7 +834,7 @@ def calculate_all_costs_with_data(all_device_data: List[Dict], cepci: CEPCIOptio
                 else:
                     costs = estimate_compressor_cost(inputs, cepci)
             elif category == 'MCompr':
-                costs = estimate_mcompr_cost(inputs, cepci)
+                costs = estimate_mcompr_cost(inputs, cepci, Application)
             elif category in ('Heater', 'Cooler', 'HeatX', 'Condenser'):
                 costs = estimate_heat_exchanger_cost(inputs, cepci)
             elif category in ('RadFrac', 'Distl', 'DWSTU'):
@@ -601,7 +861,16 @@ def get_equipment_cost_details(equipment_type: str, subtype: str) -> dict:
 
 def estimate_turbine_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, Any]:
     """터빈 비용을 계산합니다."""
-    power_kw = inputs.size_value
+    debug_steps: List[str] = []
+    
+    if inputs.power_value is None or inputs.power_unit is None:
+        raise ValueError("Missing power value or unit for turbine")
+        
+    power_kw = unit_converter.convert_units(inputs.power_value, inputs.power_unit, 'kW', 'POWER')
+    # 터빈은 출력이므로 파워가 음수일 때 양수로 변환
+    if power_kw is not None and power_kw < 0:
+        power_kw = abs(power_kw)
+    _push(debug_steps, f"S=Power={inputs.power_value} {inputs.power_unit} → {power_kw:.2f} kW")
     subtype = inputs.selected_subtype
     settings = config.get_equipment_setting("turbine", subtype)
     coeffs = settings.get("correlation_coeffs")
@@ -618,21 +887,26 @@ def estimate_turbine_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, 
         parts = []
         for _ in range(int(num_units)):
             sub_inputs = CostInputs(
-                size_value=power_per_unit,
-                size_unit=inputs.size_unit,
+                power_value=power_per_unit,
+                power_unit="kw",
                 material=inputs.material,
                 selected_subtype=subtype
             )
             parts.append(estimate_turbine_cost(sub_inputs, cepci))
         return _sum_costs(parts)
 
+    _push(debug_steps, f"logC with S={power_kw:.2f}")
     purchased_base = _eval_log_quadratic_cost(power_kw, coeffs)
+    _push(debug_steps, f"Purchased base (2001, CEPCI=397) = {purchased_base:,.2f}")
     purchased_adj = _adjust_cost_to_index(purchased_base, cepci.base_index, cepci.target_index)
+    _push(debug_steps, f"Cost adjusted = {purchased_adj:.2f}")
     
     fixed_bm_factors = settings.get("bm_factors_fixed")
     effective_bm = fixed_bm_factors.get(inputs.material, fixed_bm_factors.get(config.DEFAULT_MATERIAL))
     
     bare_module_cost = purchased_adj * effective_bm
+    _push(debug_steps, f"BM = {effective_bm:.3f}")
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -641,5 +915,6 @@ def estimate_turbine_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, 
         "bm_factor": effective_bm,
         "material_factor": 1.0,
         "pressure_factor": 1.0,
-        "size_value": power_kw
+        "size_value": power_kw,
+        "debug_steps": debug_steps
     }

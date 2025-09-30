@@ -12,6 +12,7 @@ import sys
 import math
 
 import unit_converter
+import logger
 import config
 
 # =============================================================================
@@ -100,7 +101,7 @@ def parse_bkp_file_for_blocks(file_path: str, block_names: List[str]) -> Dict[st
                 if line.strip() == block_name:
                     for j in range(i + 1, min(i + 5, len(lines))):
                         next_line = lines[j].strip()
-                        if next_line in ['Heater', 'Cooler', 'HeatX', 'Condenser']:
+                        if next_line in ['Heater', 'HeatX']:
                             category = next_line
                             break
                         elif next_line in ['RadFrac', 'Distl', 'DWSTU']:
@@ -140,6 +141,51 @@ def get_unit_type_value(Application, unit_set_name: str, unit_type: str) -> Opti
         pass
     return None
 
+def get_utility_names(Application) -> List[str]:
+    """Utilities 하위의 유틸리티 이름들을 수집하는 함수"""
+    utility_names = []
+    try:
+        utilities_node = Application.Tree.FindNode("\\Data\\Utilities")
+        if utilities_node is None:
+            print("Warning: Utilities node not found")
+            return utility_names
+        if hasattr(utilities_node, 'Elements') and utilities_node.Elements is not None:
+            for element in utilities_node.Elements:
+                try:
+                    utility_names.append(element.Name)
+                except:
+                    pass
+        return utility_names
+    except Exception as e:
+        print(f"Error collecting utility names: {str(e)}")
+        return []
+
+def get_utility_data(Application, utility_name: str) -> Dict[str, Any]:
+    """특정 유틸리티의 데이터를 추출하는 함수"""
+    utility_data = {"name": utility_name, "error": None}
+    try:
+        # 유틸리티 기본 정보 추출
+        utility_node = Application.Tree.FindNode(f"\\Data\\Utilities\\{utility_name}")
+        if utility_node is None:
+            utility_data["error"] = f"Utility node not found: {utility_name}"
+            return utility_data
+        
+        # Temperature 추출 - 입구온도와 출구온도
+        inlet_temp_raw = _read_raw_value(Application, f"\\Data\\Utilities\\{utility_name}\\Output\\UTL_IN_TEMP")
+        outlet_temp_raw = _read_raw_value(Application, f"\\Data\\Utilities\\{utility_name}\\Output\\UTL_OUT_TEMP")
+        temp_unit = get_unit_type_value(Application, get_current_unit_set(Application), 'TEMPERATURE')
+        
+        # 지정된 항목(입/출구 온도)만 반환
+        utility_data.update({
+            "inlet_temperature_value": inlet_temp_raw,
+            "outlet_temperature_value": outlet_temp_raw,
+            "temperature_unit": temp_unit
+        })
+        
+    except Exception as e:
+        utility_data["error"] = str(e)
+    return utility_data
+
 def _get_stream_names(Application, block_name: str) -> List[str]:
     """블록에 연결된 모든 스트림 이름을 가져옵니다."""
     stream_names = []
@@ -154,6 +200,159 @@ def _get_stream_names(Application, block_name: str) -> List[str]:
     except Exception:
         pass
     return stream_names
+
+def _get_stream_temperatures(Application, block_name: str, temperature_unit: str) -> Dict[str, float]:
+    """블록에 연결된 스트림들의 입구/출구 온도를 추출합니다."""
+    stream_data = {}
+    stream_names = _get_stream_names(Application, block_name)
+    
+    for stream_name in stream_names:
+        # 스트림 온도 추출 (RES_TEMP 노드 사용)
+        temp_raw = _read_raw_value(Application, f"\\Data\\Streams\\{stream_name}\\Output\\RES_TEMP")
+        if temp_raw is not None:
+            stream_data[stream_name] = temp_raw
+    
+    return stream_data
+
+def _get_inlet_outlet_streams(Application, block_name: str) -> (Optional[str], Optional[str]):
+    """Connections 하위에서 각 스트림의 IN/OUT 라벨을 읽어 입구/출구 스트림명을 반환합니다."""
+    inlet_name = None
+    outlet_name = None
+    try:
+        connections_node = Application.Tree.FindNode(f"\\Data\\Blocks\\{block_name}\\Connections")
+        if not connections_node or not hasattr(connections_node, 'Elements'):
+            return None, None
+        for element in connections_node.Elements:
+            try:
+                stream_name = element.Name
+                role_node = Application.Tree.FindNode(f"\\Data\\Blocks\\{block_name}\\Connections\\{stream_name}")
+                role_val = str(role_node.Value).upper() if role_node and role_node.Value is not None else ''
+                # 예: "F(IN)", "P(OUT)" 등 → IN/OUT 판단
+                if 'IN' in role_val and inlet_name is None:
+                    inlet_name = stream_name
+                elif 'OUT' in role_val and outlet_name is None:
+                    outlet_name = stream_name
+            except:
+                continue
+    except Exception:
+        return None, None
+    return inlet_name, outlet_name
+
+def _find_heater_utility(Application, block_name: str) -> Optional[str]:
+    """Heater 블록에서 사용 중인 유틸리티 이름을 UTL_ID 노드에서 읽어옵니다."""
+    try:
+        utl_id_path = f"\\Data\\Blocks\\{block_name}\\Output\\UTL_ID"
+        node = Application.Tree.FindNode(utl_id_path)
+        if node is None or node.Value is None:
+            return None
+        value = str(node.Value).strip()
+        return value if value != '' else None
+    except Exception:
+        return None
+
+def _find_intercooler_utility(Application, block_name: str, stage_num: int) -> Optional[str]:
+    """다단 압축기 블록의 특정 스테이지에서 사용하는 인터쿨러 유틸리티 이름을 찾습니다."""
+    try:
+        cooler_utl_path = f"\\Data\\Blocks\\{block_name}\\Input\\COOLER_UTL\\{stage_num}"
+        node = Application.Tree.FindNode(cooler_utl_path)
+        if node is None or node.Value is None:
+            return None
+        value = str(node.Value).strip()
+        return value if value != '' else None
+    except Exception:
+        return None
+
+
+def _calculate_lmtd_for_heater(Application, block_name: str, temperature_unit: str) -> Optional[float]:
+    """Heater에서 스트림 온도와 유틸리티 온도를 기반으로 LMTD를 계산합니다."""
+    try:
+        # 스트림 온도 추출
+        stream_temps = _get_stream_temperatures(Application, block_name, temperature_unit)
+        
+        if len(stream_temps) < 2:
+            return None  # 입구/출구 스트림이 모두 필요
+        
+        # Connections 라벨 기반으로 입구/출구 스트림 결정
+        inlet_name, outlet_name = _get_inlet_outlet_streams(Application, block_name)
+        if not inlet_name or not outlet_name:
+            return None
+        t1_raw = stream_temps.get(inlet_name)
+        t2_raw = stream_temps.get(outlet_name)
+        
+        if t1_raw is None or t2_raw is None:
+            return None
+        
+        # 온도를 SI 단위로 변환 (K)
+        t1_k = unit_converter.convert_units(t1_raw, temperature_unit, 'K', 'TEMPERATURE')
+        t2_k = unit_converter.convert_units(t2_raw, temperature_unit, 'K', 'TEMPERATURE')
+        
+        if t1_k is None or t2_k is None:
+            return None
+        
+        # 온도 차가 너무 작으면 LMTD 계산이 불가능
+        if abs(t2_k - t1_k) < 0.1:  # 0.1K 미만
+            return None
+        
+        # Heater와 연결된 유틸리티 찾기 및 온도 확보
+        heater_utility = _find_heater_utility(Application, block_name)
+        if not heater_utility:
+            return None
+
+        utility_data = get_utility_data(Application, heater_utility)
+        utility_inlet_temp = utility_data.get("inlet_temperature_value")
+        utility_outlet_temp = utility_data.get("outlet_temperature_value")
+        utility_temp_unit = utility_data.get("temperature_unit")
+        if utility_inlet_temp is None or utility_outlet_temp is None or not utility_temp_unit:
+            return None
+
+        utility_inlet_k = unit_converter.convert_units(utility_inlet_temp, utility_temp_unit, 'K', 'TEMPERATURE')
+        utility_outlet_k = unit_converter.convert_units(utility_outlet_temp, utility_temp_unit, 'K', 'TEMPERATURE')
+        if utility_inlet_k is None or utility_outlet_k is None:
+            return None
+
+        # 라벨링: 유틸리티가 냉각(Hot utility: 온도 하강)인지 가열(Cold utility: 온도 상승)인지 판단
+        # hot_utility: utility_inlet_k > utility_outlet_k
+        is_hot_utility = utility_inlet_k > utility_outlet_k
+
+        # 프로세스 스트림 평균/유틸리티 평균 비교로 hot/cold side 최종 결정 (대향류 가정)
+        process_avg_k = 0.5 * (t1_k + t2_k)
+        utility_avg_k = 0.5 * (utility_inlet_k + utility_outlet_k)
+
+        if is_hot_utility:
+            # 유틸리티가 hot side, 프로세스가 cold side (Heater 일반 케이스)
+            hot_in, hot_out = utility_inlet_k, utility_outlet_k
+            cold_in, cold_out = t1_k, t2_k
+        else:
+            # 유틸리티가 cold side, 프로세스가 hot side 이어야 일관
+            # 프로세스가 실제로 가열(상승) 중이면 Heater 맥락과 불일치 → 계산 불가 처리
+            if t2_k > t1_k:
+                
+                return None
+            hot_in, hot_out = t1_k, t2_k
+            cold_in, cold_out = utility_inlet_k, utility_outlet_k
+
+        # 대향류(counter-current) LMTD 계산
+        # ΔT1 = Th,i - Tc,o, ΔT2 = Th,o - Tc,i
+        delta_t1 = hot_in - cold_out
+        delta_t2 = hot_out - cold_in
+        if delta_t1 <= 0 or delta_t2 <= 0:
+            return None
+            
+        if delta_t1 == delta_t2:
+            lmtd_k = delta_t1
+        else:
+            lmtd_k = (delta_t2 - delta_t1) / math.log(delta_t2 / delta_t1)
+
+        # LMTD는 물리적으로 양수여야 함
+        if lmtd_k <= 0:
+            return None
+        
+        # LMTD는 온도차이이므로 K 단위로 반환 (절대온도 변환 금지)
+        return lmtd_k
+        
+    except Exception as e:
+        print(f"Error calculating LMTD for {block_name}: {e}", file=sys.stderr)
+        return None
 
 # =============================================================================
 # 데이터 추출 및 캐싱
@@ -182,8 +381,8 @@ def clear_aspen_cache():
 def get_cache_stats() -> Dict[str, int]:
     return {"cached_items": len(_aspen_cache._cache)}
 
-def _read_and_convert(Application, node_path: str, unit_type: str, aspen_unit: Optional[str]) -> Optional[float]:
-    """Aspen 노드에서 값을 읽어와 SI 단위로 변환합니다."""
+def _read_raw_value(Application, node_path: str) -> Optional[float]:
+    """Aspen 노드에서 원시값만 읽어 반환합니다. 단위 변환은 수행하지 않습니다."""
     try:
         node = Application.Tree.FindNode(node_path)
         if node is None or node.Value is None:
@@ -194,20 +393,14 @@ def _read_and_convert(Application, node_path: str, unit_type: str, aspen_unit: O
         if raw_value is None or str(raw_value).strip() == '':
             return None
             
-        raw_value = float(raw_value)
-        
-        # 단위가 None인 경우 그대로 반환 (이미 SI 단위일 가능성)
-        if aspen_unit is None:
-            return raw_value
-            
-        return unit_converter.convert_to_si_units(raw_value, aspen_unit, unit_type)[0]
+        return float(raw_value)
     except Exception as e:
         print(f"Error reading node {node_path}: {e}", file=sys.stderr)
         return None
 
-def _read_vessel_data(Application, block_name: str, pressure_unit: str, volume_unit: str, flow_unit: str) -> Dict[str, float]:
+def _read_vessel_data(Application, block_name: str, pressure_unit: str, volume_unit: str, volumetric_flow_unit: str) -> Dict[str, any]:
     """용기(Vessel)의 압력과 부피 유량을 추출합니다."""
-    extracted_data = {'max_pressure_si': None, 'max_flow_si': None}
+    extracted_data = {'max_pressure_value': None, 'max_pressure_unit': pressure_unit, 'max_flow_value': None, 'max_flow_unit': volumetric_flow_unit}
     stream_names = _get_stream_names(Application, block_name)
     
     max_pressure = -1.0
@@ -215,24 +408,24 @@ def _read_vessel_data(Application, block_name: str, pressure_unit: str, volume_u
     
     for stream_name in stream_names:
         pressure_path = f"\\Data\\Blocks\\{block_name}\\Stream Results\\Table\\Pressure {pressure_unit} {stream_name}"
-        flow_path = f"\\Data\\Blocks\\{block_name}\\Stream Results\\Table\\Volume Flow {flow_unit} {stream_name}"
+        flow_path = f"\\Data\\Blocks\\{block_name}\\Stream Results\\Table\\Volume Flow {volumetric_flow_unit} {stream_name}"
 
-        pressure_si = _read_and_convert(Application, pressure_path, "PRESSURE", pressure_unit)
-        flow_si = _read_and_convert(Application, flow_path, "VOLUME-FLOW", flow_unit)
+        pressure_raw = _read_raw_value(Application, pressure_path)
+        flow_raw = _read_raw_value(Application, flow_path)
 
-        if pressure_si is not None and pressure_si > max_pressure:
-            max_pressure = pressure_si
-        if flow_si is not None and flow_si > max_flow:
-            max_flow = flow_si
+        if pressure_raw is not None and pressure_raw > max_pressure:
+            max_pressure = pressure_raw
+        if flow_raw is not None and flow_raw > max_flow:
+            max_flow = flow_raw
     
     if max_pressure >= 0:
-        extracted_data['max_pressure_si'] = max_pressure
+        extracted_data['max_pressure_value'] = max_pressure
     if max_flow >= 0:
-        extracted_data['max_flow_si'] = max_flow
+        extracted_data['max_flow_value'] = max_flow
         
     return extracted_data
 
-def _extract_mcompr_stage_data(Application, block_name: str, power_unit: Optional[str], pressure_unit: Optional[str], heat_unit: Optional[str]) -> Dict[int, Dict[str, Optional[float]]]:
+def _extract_mcompr_stage_data(Application, block_name: str, power_unit: Optional[str], pressure_unit: Optional[str], heat_unit: Optional[str], temperature_unit: Optional[str]) -> Dict[int, Dict[str, Optional[float]]]:
     """MCompr 블록의 단계별 데이터를 추출하는 함수"""
     stage_data = {}
     try:
@@ -249,21 +442,65 @@ def _extract_mcompr_stage_data(Application, block_name: str, power_unit: Optiona
             cool_temp_path = f"\\Data\\Blocks\\{block_name}\\Output\\COOL_TEMP\\{stage_num}"
             q_calc_path = f"\\Data\\Blocks\\{block_name}\\Output\\QCALC\\{stage_num}"
             
-            pressure_si = _aspen_cache.get_data(f"pressure_{block_name}_{stage_num}", _read_and_convert, Application, pressure_path, "PRESSURE", pressure_unit)
-            power_si = _aspen_cache.get_data(f"power_{block_name}_{stage_num}", _read_and_convert, Application, power_path, "POWER", power_unit)
-            temp_si = _aspen_cache.get_data(f"temp_{block_name}_{stage_num}", _read_and_convert, Application, temp_path, "TEMPERATURE", None)
-            cool_temp_si = _aspen_cache.get_data(f"cool_temp_{block_name}_{stage_num}", _read_and_convert, Application, cool_temp_path, "TEMPERATURE", None)
-            q_calc_si = _aspen_cache.get_data(f"q_calc_{block_name}_{stage_num}", _read_and_convert, Application, q_calc_path, "HEAT", heat_unit)
+            pressure_raw = _aspen_cache.get_data(f"pressure_{block_name}_{stage_num}", _read_raw_value, Application, pressure_path)
+            power_raw = _aspen_cache.get_data(f"power_{block_name}_{stage_num}", _read_raw_value, Application, power_path)
+            temp_raw = _aspen_cache.get_data(f"temp_{block_name}_{stage_num}", _read_raw_value, Application, temp_path)
+            cool_temp_raw = _aspen_cache.get_data(f"cool_temp_{block_name}_{stage_num}", _read_raw_value, Application, cool_temp_path)
+            q_calc_raw = _aspen_cache.get_data(f"q_calc_{block_name}_{stage_num}", _read_raw_value, Application, q_calc_path)
+
+            # 인터쿨러 LMTD 계산 (Heater와 동일한 방식)
+            intercooler_lmtd = None
+            try:
+                if temp_raw is not None and cool_temp_raw is not None and temperature_unit:
+                    # 인터쿨러 유틸리티 찾기
+                    cooler_utility = _find_intercooler_utility(Application, block_name, stage_num)
+                    if cooler_utility:
+                        # 유틸리티 온도 데이터 가져오기
+                        utility_data = get_utility_data(Application, cooler_utility)
+                        utility_inlet_temp = utility_data.get("inlet_temperature_value")
+                        utility_outlet_temp = utility_data.get("outlet_temperature_value")
+                        utility_temp_unit = utility_data.get("temperature_unit")
+                        
+                        if utility_inlet_temp is not None and utility_outlet_temp is not None and utility_temp_unit:
+                            # 온도를 SI 단위로 변환 (K)
+                            T_h_in = unit_converter.convert_units(temp_raw, temperature_unit, 'K', 'TEMPERATURE')
+                            T_h_out = unit_converter.convert_units(cool_temp_raw, temperature_unit, 'K', 'TEMPERATURE')
+                            T_c_in = unit_converter.convert_units(utility_inlet_temp, utility_temp_unit, 'K', 'TEMPERATURE')
+                            T_c_out = unit_converter.convert_units(utility_outlet_temp, utility_temp_unit, 'K', 'TEMPERATURE')
+                            
+                            if T_h_in is not None and T_h_out is not None and T_c_in is not None and T_c_out is not None:
+                                # 온도 차가 너무 작으면 LMTD 계산이 불가능
+                                if abs(T_h_out - T_h_in) >= 0.1:  # 0.1K 이상
+                                    # 대향류(counter-current) LMTD 계산
+                                    # ΔT1 = Th,i - Tc,o, ΔT2 = Th,o - Tc,i
+                                    delta_t1 = T_h_in - T_c_out
+                                    delta_t2 = T_h_out - T_c_in
+                                    
+                                    if delta_t1 > 0 and delta_t2 > 0:
+                                        if delta_t1 == delta_t2:
+                                            intercooler_lmtd = delta_t1
+                                        else:
+                                            intercooler_lmtd = (delta_t2 - delta_t1) / math.log(delta_t2 / delta_t1)
+            except Exception as e:
+                intercooler_lmtd = None
 
             stage_data[stage_num] = {
-                'outlet_pressure_bar': unit_converter.convert_pressure_to_bar(pressure_si, 'N/sqm') if pressure_si is not None else None,
-                'power_kilowatt': unit_converter.convert_power_to_kw(power_si, 'Watt') if power_si is not None else None,
-                'B_TEMP_K': temp_si,
-                'COOL_TEMP_K': cool_temp_si,
-                'q_watt': unit_converter.convert_to_si_units(q_calc_si, heat_unit, 'HEAT')[0] if q_calc_si is not None else None
+                'pressure_value': pressure_raw,
+                'pressure_unit': pressure_unit,
+                'power_value': power_raw,
+                'power_unit': power_unit,
+                'temp_value': temp_raw,
+                'temp_unit': temperature_unit,
+                'cool_temp_value': cool_temp_raw,
+                'cool_temp_unit': temperature_unit,
+                'q_value': q_calc_raw,
+                'q_unit': heat_unit,
+                'intercooler_lmtd': intercooler_lmtd
             }
     except Exception as e:
         print(f"Error extracting MCompr stage data for {block_name}: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         return {}
     return stage_data
 
@@ -282,33 +519,62 @@ def extract_all_device_data(Application, block_info: Dict[str, str], unit_set_na
     power_unit = get_unit_type_value(Application, unit_set_name, 'POWER')
     pressure_unit = get_unit_type_value(Application, unit_set_name, 'PRESSURE')
     volume_unit = get_unit_type_value(Application, unit_set_name, 'VOLUME')
-    flow_unit = get_unit_type_value(Application, unit_set_name, 'VOLUME-FLOW')
-    heat_unit = get_unit_type_value(Application, unit_set_name, 'HEAT')
+    volumetric_flow_unit = get_unit_type_value(Application, unit_set_name, 'VOLUME-FLOW')
+    heat_unit = get_unit_type_value(Application, unit_set_name, 'ENTHALPY-FLO')
+    heat_transfer_coeff_unit = get_unit_type_value(Application, unit_set_name, 'HEAT-TRANS-C')
+    temperature_unit = get_unit_type_value(Application, unit_set_name, 'TEMPERATURE')
     
     for name, cat in block_info.items():
-        if cat in ('Pump', 'Compr', 'MCompr', 'Heater', 'Cooler', 'HeatX', 'Condenser', 'RStoic', 'RCSTR', 'RPlug', 'RBatch', 'REquil', 'RYield', 'Flash', 'Sep', 'RadFrac', 'Distl', 'DWSTU'):
-            device_data = _extract_device_data(Application, name, cat, power_unit, pressure_unit, flow_unit, heat_unit, volume_unit)
-            all_devices_data.append(device_data)
+        if cat in ('Pump', 'Compr', 'MCompr', 'Heater', 'HeatX', 'RStoic', 'RCSTR', 'RPlug', 'RBatch', 'REquil', 'RYield', 'Flash', 'Sep', 'RadFrac', 'Distl', 'DWSTU'):
+            try:
+                device_data = _extract_device_data(Application, name, cat, power_unit, pressure_unit, volumetric_flow_unit, heat_unit, heat_transfer_coeff_unit, temperature_unit, volume_unit)
+                all_devices_data.append(device_data)
+            except Exception as e:
+                print(f"Debug: Failed to extract data for {name} ({cat}): {e}", file=sys.stderr)
+                import traceback
+                traceback.print_exc()
+                all_devices_data.append({"name": name, "category": cat, "error": f"Data extraction failed: {e}"})
+        elif cat == 'Unknown':
+            # Unknown 장치들은 추가 정보 없이 처리 불가능
+            all_devices_data.append({
+                "name": name, 
+                "category": "Unknown", 
+                "error": "Block type could not be classified - manual input required"
+            })
         elif cat in ('Valve', 'Mixer', 'FSplit'):
             all_devices_data.append({"name": name, "category": "Ignored", "error": "Device type ignored (Valve/Mixer/Splitter)"})
         else:
             all_devices_data.append({"name": name, "category": "Ignored", "error": "Unsupported device type"})
+    
         
     return all_devices_data
 
+def extract_all_utility_data(Application) -> List[Dict[str, Any]]:
+    """
+    모든 유틸리티 데이터를 추출합니다.
+    """
+    utilities_data = []
+    utility_names = get_utility_names(Application)
+    
+    for utility_name in utility_names:
+        utility_data = get_utility_data(Application, utility_name)
+        utilities_data.append({
+            "name": utility_name,  # UTILITY_ 접두사 제거
+            "category": "Utility",
+            "utility_data": utility_data
+        })
+        
+    return utilities_data
 
-def _extract_device_data(Application, name: str, cat: str, power_unit: str, pressure_unit: str, flow_unit: str, heat_unit: str, volume_unit: str) -> Dict[str, Any]:
+
+def _extract_device_data(Application, name: str, cat: str, power_unit: str, pressure_unit: str, volumetric_flow_unit: str, heat_unit: str, heat_transfer_coeff_unit: str, temperature_unit: str, volume_unit: str) -> Dict[str, Any]:
     """단일 장치의 데이터를 추출하고 표준화합니다."""
     device = {"name": name, "category": cat, "error": None}
     
     try:
         if cat == 'MCompr':
-            stage_data = _extract_mcompr_stage_data(Application, name, power_unit, pressure_unit, heat_unit)
-            total_power_kw = sum(s['power_kilowatt'] for s in stage_data.values() if s['power_kilowatt'] is not None)
-            
+            stage_data = _extract_mcompr_stage_data(Application, name, power_unit, pressure_unit, heat_unit, temperature_unit)
             device.update({
-                "size_value": total_power_kw,
-                "size_unit": "kW",
                 "stage_data": stage_data,
                 "material": config.DEFAULT_MATERIAL,
                 "selected_type": "multi-stage compressor",
@@ -317,92 +583,115 @@ def _extract_device_data(Application, name: str, cat: str, power_unit: str, pres
             })
         
         elif cat in ('Pump', 'Compr'):
-            power_si = _read_and_convert(Application, f"\\Data\\Blocks\\{name}\\Output\\WNET", "POWER", power_unit)
-            power_kw = unit_converter.convert_power_to_kw(power_si, 'Watt')
+            power_raw = _read_raw_value(Application, f"\\Data\\Blocks\\{name}\\Output\\WNET")
+            in_pres_raw = _read_raw_value(Application, f"\\Data\\Blocks\\{name}\\Output\\IN_PRES")
+            out_pres_raw = _read_raw_value(Application, f"\\Data\\Blocks\\{name}\\Output\\POC")
             
-            in_pres_si = _read_and_convert(Application, f"\\Data\\Blocks\\{name}\\Output\\IN_PRES", "PRESSURE", pressure_unit)
-            out_pres_si = _read_and_convert(Application, f"\\Data\\Blocks\\{name}\\Output\\POC", "PRESSURE", pressure_unit)
-            
-            in_pres_bar = unit_converter.convert_pressure_to_bar(in_pres_si, 'N/sqm')
-            out_pres_bar = unit_converter.convert_pressure_to_bar(out_pres_si, 'N/sqm')
+            # 팬 판정을 위해 임시로 변환하여 사용 (나중에 cost_calculator에서 제대로 처리)
+            # 팬 판정에서만 단위 변환 수행
+            temp_power_kw = power_raw
+            temp_in_pres_bar = unit_converter.convert_units(in_pres_raw, pressure_unit, 'bar', 'PRESSURE') if in_pres_raw is not None and pressure_unit else in_pres_raw
+            temp_out_pres_bar = unit_converter.convert_units(out_pres_raw, pressure_unit, 'bar', 'PRESSURE') if out_pres_raw is not None and pressure_unit else out_pres_raw
             
             if cat == 'Pump':
-                pressure_delta_bar = in_pres_bar
-                in_pres_bar = out_pres_bar - pressure_delta_bar if out_pres_bar is not None and pressure_delta_bar is not None else None
+                temp_pressure_delta = temp_in_pres_bar
+                temp_in_pres_bar = temp_out_pres_bar - temp_pressure_delta if temp_out_pres_bar is not None and temp_pressure_delta is not None else None
             else:
-                pressure_delta_bar = out_pres_bar - in_pres_bar if in_pres_bar is not None and out_pres_bar is not None else None
+                temp_pressure_delta = temp_out_pres_bar - temp_in_pres_bar if temp_in_pres_bar is not None and temp_out_pres_bar is not None else None
             
-            vol_flow_m3_s = None
-            if _suggest_pressure_device_type(cat, in_pres_bar, out_pres_bar) == 'fan':
-                vol_flow_si = _read_and_convert(Application, f"\\Data\\Blocks\\{name}\\Output\\FEED_VFLOW", "VOLUME-FLOW", flow_unit)
-                vol_flow_m3_s = unit_converter.convert_flow_to_m3_s(vol_flow_si, 'cum/sec')
+            vol_flow_raw = None
+            if _suggest_pressure_device_type(cat, temp_in_pres_bar, temp_out_pres_bar) == 'fan':
+                vol_flow_raw = _read_raw_value(Application, f"\\Data\\Blocks\\{name}\\Output\\FEED_VFLOW")
             
             device.update({
-                "size_value": power_kw,
-                "size_unit": "kW",
-                "power_kilowatt": power_kw,
-                "inlet_bar": in_pres_bar,
-                "outlet_bar": out_pres_bar,
-                "pressure_delta_bar": pressure_delta_bar,
-                "volumetric_flow_m3_s": vol_flow_m3_s,
+                "power_value": power_raw,
+                "power_unit": power_unit,
+                "inlet_pressure_value": in_pres_raw,
+                "inlet_pressure_unit": pressure_unit,
+                "outlet_pressure_value": out_pres_raw,
+                "outlet_pressure_unit": pressure_unit,
+                "pressure_drop_value": temp_pressure_delta,
+                "pressure_drop_unit": pressure_unit,
+                "volumetric_flow_value": vol_flow_raw,
+                "volumetric_flow_unit": volumetric_flow_unit,
+                "operating_pressure_value": out_pres_raw,  # 펌프의 작업 압력으로 배압 사용
+                "operating_pressure_unit": pressure_unit,
                 "material": config.DEFAULT_MATERIAL,
-                "selected_type": _suggest_pressure_device_type(cat, in_pres_bar, out_pres_bar),
-                "selected_subtype": _get_default_subtype(_suggest_pressure_device_type(cat, in_pres_bar, out_pres_bar)),
+                "selected_type": _suggest_pressure_device_type(cat, temp_in_pres_bar, temp_out_pres_bar),
+                "selected_subtype": _get_default_subtype(_suggest_pressure_device_type(cat, temp_in_pres_bar, temp_out_pres_bar)),
             })
             
-        elif cat in ('Heater', 'Cooler', 'HeatX', 'Condenser'):
-            q_si = _read_and_convert(Application, f"\\Data\\Blocks\\{name}\\Output\\HX_DUTY", "HEAT", heat_unit)
-            u_si = _read_and_convert(Application, f"\\Data\\Blocks\\{name}\\Input\\U", "UA", None)
-            lmtd_si = _read_and_convert(Application, f"\\Data\\Blocks\\{name}\\Output\\HX_DTLM", "TEMPERATURE", None)
+        elif cat in ('Heater', 'HeatX'):
+            # 열교환기 데이터 추출
+            u_raw = _read_raw_value(Application, f"\\Data\\Blocks\\{name}\\Input\\U")
             
-            area_sqm = None
-            if q_si is not None and u_si is not None and lmtd_si is not None and u_si != 0 and lmtd_si != 0:
-                area_sqm = q_si / (u_si * lmtd_si)
+            # Heat duty 노드는 블록 타입에 따라 다름
+            if cat == 'Heater':
+                q_raw = _read_raw_value(Application, f"\\Data\\Blocks\\{name}\\Output\\QNET")
+                # Heater의 경우 계산된 LMTD만 사용
+                calculated_lmtd = _calculate_lmtd_for_heater(Application, name, temperature_unit)
+                if calculated_lmtd is None:
+                    device["error"] = f"Heater LMTD calculation failed - insufficient temperature data"
+                    return device
+                lmtd_raw = calculated_lmtd
+                
+                # Heater의 경우 U값이 없으면 기본값 사용
+                if u_raw is None:
+                    u_raw = 850.0  # W/m²·K (Heater 기본 열전달 계수)
+            else:  # HeatX
+                q_raw = _read_raw_value(Application, f"\\Data\\Blocks\\{name}\\Output\\HX_DUTY")
+                lmtd_raw = _read_raw_value(Application, f"\\Data\\Blocks\\{name}\\Output\\HX_DTLM")
+
+            # 열교환기 기본 타입 설정 (사용자가 나중에 오버라이드로 변경 가능)
+            heat_exchanger_type = "fixed_tube"  # 기본값: 고정관 열교환기
+            
+            # heat duty가 None인 경우 적절한 메시지 설정
+            if q_raw is None:
+                device["error"] = "Heat duty calculation failed or device has no heat exchange (possibly bypass condition)"
+                return device
             
             device.update({
-                "size_value": area_sqm,
-                "size_unit": "sqm",
-                "q_watt": q_si,
-                "u_w_m2k": u_si,
-                "lmtd_k": lmtd_si,
+                "heat_duty_value": q_raw,
+                "heat_duty_unit": heat_unit,
+                "heat_transfer_coefficient_value": u_raw,
+                "heat_transfer_coefficient_unit": heat_transfer_coeff_unit,
+                "log_mean_temp_difference_value": lmtd_raw,
+                "log_mean_temp_difference_unit": "K",
+                "log_mean_temp_difference_unit_type": "DELTA-T",
                 "material": config.DEFAULT_MATERIAL,
                 "selected_type": "heat_exchanger",
-                "selected_subtype": "fixed_tube",
+                "selected_subtype": heat_exchanger_type,
                 "shell_material": config.DEFAULT_MATERIAL,
                 "tube_material": config.DEFAULT_MATERIAL,
             })
             
         elif cat in ('RStoic', 'RCSTR', 'RPlug', 'RBatch', 'REquil', 'RYield'):
-            v_data = _read_vessel_data(Application, name, pressure_unit, volume_unit, flow_unit)
-            holdup_time_sec = 2.0 * 3600 # 2시간을 초 단위로
-            volume_cum = v_data['max_flow_si'] * holdup_time_sec if v_data['max_flow_si'] is not None else None
+            v_data = _read_vessel_data(Application, name, pressure_unit, volume_unit, volumetric_flow_unit)
             
             device.update({
-                "size_value": volume_cum,
-                "size_unit": "cum",
-                "outlet_bar": unit_converter.convert_pressure_to_bar(v_data['max_pressure_si'], 'N/sqm'),
+                "volume_value": None,  # 체적 계산은 cost_calculator에서 수행
+                "volume_unit": volume_unit,
+                "operating_pressure_value": v_data['max_pressure_value'],
+                "operating_pressure_unit": v_data['max_pressure_unit'],
+                "mass_flow_value": v_data['max_flow_value'],
+                "mass_flow_unit": v_data['max_flow_unit'],
+                "residence_time_hours_value": 2.0,  # 체류시간 설정값 전달
                 "material": config.DEFAULT_MATERIAL,
                 "selected_type": "reactor",
                 "selected_subtype": "autoclave",
             })
         
         elif cat in ('Flash', 'Sep'):
-            v_data = _read_vessel_data(Application, name, pressure_unit, volume_unit, flow_unit)
-            holdup_time_sec = 5.0 * 60 # 5분을 초 단위로
-            volume_cum = (v_data['max_flow_si'] * holdup_time_sec) if v_data['max_flow_si'] is not None else None
-            
-            if volume_cum is not None:
-                diameter = (4 * volume_cum / (3 * math.pi))**(1/3)
-                height = diameter * 3
-            else:
-                diameter, height = None, None
+            v_data = _read_vessel_data(Application, name, pressure_unit, volume_unit, volumetric_flow_unit)
             
             device.update({
-                "size_value": volume_cum,
-                "size_unit": "cum",
-                "outlet_bar": unit_converter.convert_pressure_to_bar(v_data['max_pressure_si'], 'N/sqm'),
-                "diameter": diameter,
-                "height_or_length": height,
+                "volume_value": None,  # 체적 계산은 cost_calculator에서 수행
+                "volume_unit": volume_unit,
+                "operating_pressure_value": v_data['max_pressure_value'],
+                "operating_pressure_unit": v_data['max_pressure_unit'],
+                "mass_flow_value": v_data['max_flow_value'],
+                "mass_flow_unit": v_data['max_flow_unit'],
+                "residence_time_minutes_value": 5.0,  # 체류시간 설정값 전달
                 "material": config.DEFAULT_MATERIAL,
                 "selected_type": "vessel",
                 "selected_subtype": "vertical",
@@ -411,8 +700,8 @@ def _extract_device_data(Application, name: str, cat: str, power_unit: str, pres
         elif cat in ('RadFrac', 'Distl', 'DWSTU'):
             # 증류탑들을 별도 카테고리로 분류 (비용 계산 로직은 추후 구현 예정)
             device.update({
-                "size_value": None,  # 추후 구현 예정
-                "size_unit": "N/A",
+                "volume_value": None,  # 추후 구현 예정
+                "volume_unit": "N/A",
                 "material": config.DEFAULT_MATERIAL,
                 "selected_type": "distillation_column",
                 "selected_subtype": "tray_column",  # 기본값
@@ -420,6 +709,8 @@ def _extract_device_data(Application, name: str, cat: str, power_unit: str, pres
             })
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         device["error"] = str(e)
     return device
 

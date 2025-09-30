@@ -12,10 +12,27 @@ import sys
 # 단위 변환 데이터
 # =============================================================================
 UNIT_DATA = {
+    'DELTA-T': {
+        'si_base': 'K',
+        'units': {
+            'K': 1.0,
+            'Kelvin': 1.0,
+            'delta-K': 1.0,
+            'C': 1.0,
+            'degC': 1.0,
+            'DELTA-C': 1.0,
+            'F': 5.0/9.0,
+            'degF': 5.0/9.0,
+            'DELTA-F': 5.0/9.0,
+            'R': 5.0/9.0,
+            'degR': 5.0/9.0,
+            'DELTA-R': 5.0/9.0,
+        }
+    },
     'AREA': {
         'si_base': 'sqm',
         'units': {
-            'sqm': 1.0, 'm2': 1.0, 'm^2': 1.0, 'sqft': 0.092903, 'sqcm': 0.0001,
+            'sqm': 1.0, 'sqft': 0.092903, 'sqcm': 0.0001,
             'sqin': 0.00064516, 'sqmile': 2589988.11, 'sqmm': 0.000001
         }
     },
@@ -37,12 +54,10 @@ UNIT_DATA = {
             'J': 1.0, 'Btu': 1055.06, 'cal': 4.184, 'kcal': 4184.0, 'kWhr': 3600000.0,
             'ft-lbf': 1.35582, 'GJ': 1000000000.0, 'kJ': 1000.0, 'N-m': 1.0, 'MJ': 1000000.0,
             'Mcal': 4184000.0, 'Gcal': 4184000000.0, 'Mbtu': 1055060000.0,
-            'MMBtu': 1055060000000.0, 'hp-hr': 2684520.0, 'MMkcal': 4184000000000.0,
-            'Mmkcal': 4184000000000000.0, 'Pcu': 1055.06, 'MMPcu': 1055060000000.0,
-            'kW-hr': 3600000.0
+            'MMBtu': 1055060000000.0, 'hp-hr': 2684520.0, 'MMkcal': 4184000000000.0
         }
     },
-    'FLOW': {
+    'MASS-FLOW': {
         'si_base': 'kg/sec',
         'units': {
             'kg/sec': 1.0, 'lb/hr': 0.000125998, 'kg/hr': 0.000277778, 'lb/sec': 0.453592,
@@ -58,8 +73,6 @@ UNIT_DATA = {
             'kg/oper-year': 3.52775e-08, 'lb/oper-year': 1.59891e-08, 'Mlb/oper-year': 1.59891e-05,
             'MIMIb/oper-year': 0.0159891, 'Mtons/oper-year': 35.2775, 'MMtons/oper-year': 35277.5,
             'ML-tons/oper-year': 35.7230, 'MML-tons/oper-year': 35723.0, 'ktonne/oper-year': 0.0352775,
-            'gm/sec': 0.001, 'tons/year': 0.0317098, 'tonne/day': 0.0115741, 'tonne/year': 0.0317098,
-            'tons/oper-year': 0.0352775, 'tonne/oper-year': 0.0352775
         }
     },
     'MASS': {
@@ -135,7 +148,7 @@ UNIT_DATA = {
     'POWER': {
         'si_base': 'Watt',
         'units': {
-            'Watt': 1.0, 'W': 1.0, 'hp': 745.7, 'kW': 1000.0, 'Btu/hr': 0.293071,
+            'Watt': 1.0, 'hp': 745.7, 'kW': 1000.0, 'Btu/hr': 0.293071,
             'cal/sec': 4.184, 'ft-lbf/sec': 1.35582, 'MIW': 1000000.0,
             'GW': 1000000000.0, 'MJ/hr': 277.778, 'kcal/hr': 1.16222,
             'Gcal/hr': 1162220.0, 'MMBtu/hr': 293071.0, 'MBtu/hr': 293.071,
@@ -149,11 +162,11 @@ UNIT_DATA = {
     'PRESSURE': {
         'si_base': 'N/sqm',
         'units': {
-            'N/sqm': 1.0, 'Pa': 1.0, 'PsIa': 6894.76, 'atm': 101325.0, 'lbf/sqft': 47.8803,
+            'N/sqm': 1.0, 'Psia': 6894.76, 'atm': 101325.0, 'lbf/sqft': 47.8803,
             'bar': 100000.0, 'torr': 133.322, 'in-water': 249.089, 'kg/sqcm': 98066.5,
             'mmHg': 133.322, 'kPa': 1000.0, 'mm-water': 9.80665, 'mbar': 100.0,
             'psig': 'gauge_to_abs_psi', 'atmg': 'gauge_to_abs_atm', 'barg': 'gauge_to_abs_bar',
-            'pa': 1.0, 'MiPa': 1000000.0, 'Pag': 'gauge_to_abs_Pa', 'kPag': 'gauge_to_abs_kPa',
+            'Pa': 1.0, 'MiPa': 1000000.0, 'Pag': 'gauge_to_abs_Pa', 'kPag': 'gauge_to_abs_kPa',
             'MPag': 'gauge_to_abs_MPa', 'mbarg': 'gauge_to_abs_mbar', 'psi': 6894.76, 'bara': 100000.0,
             'in-Hg': 3386.39, 'mm-Hg-vac': -133.322, 'in-Hg-vac': -3386.39
         }
@@ -175,6 +188,29 @@ UNIT_DATA = {
             'm/sec': 1.0, 'ft/sec': 0.3048, 'mile/hr': 0.44704, 'km/hr': 0.277778,
             'ft/min': 0.00508, 'mm/day': 1.15741e-08, 'mm/hr': 2.77778e-07,
             'mm/day30': 1.15741e-08, 'in/day': 2.93995e-07
+        }
+    },
+    'ENTHALPY-FLO': {
+        'si_base': 'Watt',
+        'units': {
+            'Watt': 1.0, 'J/sec': 1.0, 'kW': 1000.0, 'MW': 1000000.0, 'GW': 1000000000.0,
+            'kJ/sec': 1000.0, 'Btu/hr': 0.293071, 'cal/sec': 4.184, 'kcal/hr': 1.16222,
+            'Gcal/hr': 1162220.0, 'Mcal/hr': 1162.22, 'kJ/hr': 0.277778, 'MJ/hr': 277.778,
+            'GJ/hr': 277778.0, 'MMBtu/hr': 293071.0, 'MBtu/hr': 293.071, 'Pcu/hr': 0.293071,
+            'MMPcu/hr': 293071.0, 'MMkcal/hr': 1162220.0, 'MMkcal/day': 48342.5,
+            'Gcal/day': 48503.7, 'Mcal/day': 48.5037
+        }
+    },
+    'HEAT-TRANS-C': {
+        'si_base': 'Watt/sqm-K',
+        'units': {
+            'Watt/sqm-K': 1.0, 'Btu/hr-sqft-R': 5.67826, 'Btu/hr-sqft-F': 5.67826,
+            'cal/sec-sqcm-K': 41840.0, 'kcal/sec-sqm-K': 4184.0, 'kcal/hr-sqm-K': 1.16222,
+            'kcal/hr-sqm-C': 1.16222, 'kW/sqm-K': 1000.0, 'MW/sqm-K': 1000000.0,
+            'J/sec-sqm-K': 1.0, 'kJ/sec-sqm-K': 1040.0, 'MJ/sec-sqm-K': 1000000.0,
+            'kJ/sec-sqm-C': 1000.0, 'MJ/sec-sqm-C': 1000000.0,
+            'GJ/hr-sqm-K': 277.778, 'GJ/hr-sqm-C': 277.778,
+            'Pcu/hr-sqft-K': 5.67826, 'MMBtu/hr-sqft-R': 5678.26, 'MMBtu/hr-sqft-F': 5678.26
         }
     },
     'UA': {
@@ -290,33 +326,67 @@ _unit_converter = UnitConverter()
 
 def get_unit_converter() -> UnitConverter: return _unit_converter
 def convert_to_si_units(value: float, from_unit: str, unit_type: str) -> tuple[float, str]: return _unit_converter.convert_to_si(value, from_unit, unit_type)
-def convert_power_to_kw(value: float, unit: Optional[str]) -> Optional[float]:
-    if unit is None or value is None: return None
-    try:
-        converted_value, _ = _unit_converter.convert_to_si(value, unit, 'POWER')
-        if converted_value is None:
-            return None
-        return converted_value / 1000.0
-    except Exception as e:
-        print(f"POWER CONVERSION ERROR: {e}", file=sys.stderr)
+def convert_units(value: float, from_unit: str, to_unit: str, unit_type: str) -> Optional[float]:
+    """
+    일반적인 단위 변환 함수 - 모든 단위 타입에 대해 입력/출력 단위를 자유롭게 지정 가능
+    
+    Args:
+        value: 변환할 값
+        from_unit: 입력 단위 (예: 'hp', 'kPa', 'cuft/min')
+        to_unit: 출력 단위 (예: 'kW', 'bar', 'm3/s')
+        unit_type: 단위 타입 ('POWER', 'PRESSURE', 'VOLUME-FLOW', 'VOLUME', 'AREA' 등)
+    
+    Returns:
+        변환된 값 (단위 오류 시 None)
+        
+    Examples:
+        >>> convert_units(100, 'hp', 'kW', 'POWER')
+        74.57
+        >>> convert_units(1000, 'kPa', 'bar', 'PRESSURE')
+        10.0
+        >>> convert_units(1000, 'cuft/min', 'm3/s', 'VOLUME-FLOW')
+        0.471947
+    """
+    if value is None or from_unit is None or to_unit is None:
         return None
-def convert_pressure_to_bar(value: float, unit: Optional[str]) -> Optional[float]:
-    if unit is None or value is None: return None
+    
     try:
-        converted_value, _ = _unit_converter.convert_to_si(value, unit, 'PRESSURE')
-        if converted_value is None:
+        # 먼저 SI 단위로 변환
+        si_value, _ = _unit_converter.convert_to_si(value, from_unit, unit_type)
+        if si_value is None:
             return None
-        return converted_value / 100000.0
-    except Exception as e:
-        print(f"PRESSURE CONVERSION ERROR: {e}", file=sys.stderr)
-        return None
-def convert_flow_to_m3_s(value: float, unit: Optional[str]) -> Optional[float]:
-    if unit is None or value is None: return None
-    try:
-        converted_value, _ = _unit_converter.convert_to_si(value, unit, 'VOLUME-FLOW')
-        if converted_value is None:
-            return None
+            
+        # SI 단위에서 목표 단위로 변환
+        converted_value = _unit_converter.convert_from_si(si_value, to_unit, unit_type)
         return converted_value
+        
     except Exception as e:
-        print(f"FLOW CONVERSION ERROR: {e}", file=sys.stderr)
+        print(f"UNIT CONVERSION ERROR ({unit_type}): {e}", file=sys.stderr)
         return None
+
+# 사용 예시 (코드 일관성을 위해 명시적 변환 사용):
+#
+# 동력 변환:
+# power_kw = convert_units(motor_power, 'hp', 'kW', 'POWER')
+# shaft_power_hp = convert_units(calculated_power, 'kW', 'hp', 'POWER')
+#
+# 압력 변환:
+# pressure_bar = convert_units(process_pressure, 'barg', 'bar', 'PRESSURE')
+# pressure_psi = convert_units(vessel_pressure, 'bar', 'psi', 'PRESSURE')
+#
+# 유량 변환:
+# volumetric_flow = convert_units(pump_flow, 'gal/min', 'm3/s', 'VOLUME-FLOW')
+# mass_flow_kg_s = convert_units(stream_mass_flow, 'lb/hr', 'kg/sec', 'MASS-FLOW')
+#
+# 체적/면적 변환:
+# tank_volume_cum = convert_units(design_volume, 'gal', 'cum', 'VOLUME')
+# heat_area_sqm = convert_units(heat_transfer_area, 'sqft', 'sqm', 'AREA')
+#
+# 열전달 계수 변환:
+# u_wattsqmk = convert_units(u_value, 'Btu/hr-sqft-F', 'Watt/sqm-K', 'HEAT-TRANS-C')
+# u_kcalhrsqmk = convert_units(u_value, 'Watt/sqm-K', 'kcal/hr-sqm-K', 'HEAT-TRANS-C')
+#
+# 열부하(Heat Duty) 변환:
+# heat_duty_watt = convert_units(duty_value, 'Btu/hr', 'Watt', 'ENTHALPY-FLO')
+# heat_duty_kw = convert_units(duty_value, 'MMBtu/hr', 'kW', 'ENTHALPY-FLO')
+# heat_duty_mw = convert_units(duty_value, 'kcal/hr', 'MW', 'ENTHALPY-FLO')
