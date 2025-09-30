@@ -250,6 +250,47 @@ def _find_heater_utility(Application, block_name: str) -> Optional[str]:
     except Exception:
         return None
 
+def _get_heater_pressures(Application, block_name: str, pressure_unit: str) -> Dict[str, Optional[float]]:
+    r"""Heater의 셸/튜브 측 압력을 노드에서 추출합니다.
+    - 셸 측: 공정 스트림 입구 압력 (\Data\Streams\{inlet_name}\Output\RES_PRES)
+    - 튜브 측: 유틸리티 입구 압력 (\Data\Utilities\{utility_name}\Output\UTL_IN_PRES)
+    """
+    shell_pressure = None
+    tube_pressure = None
+
+    # 셸 측: Heater 블록의 입구 스트림을 찾아 스트림 압력 사용
+    inlet_name, _ = _get_inlet_outlet_streams(Application, block_name)
+    if inlet_name:
+        shell_path = f"\\Data\\Streams\\{inlet_name}\\Output\\RES_PRES"
+        shell_pressure = _read_raw_value(Application, shell_path)
+
+    # 튜브 측: Heater에서 사용 중인 유틸리티의 입구 압력 사용
+    utility_name = _find_heater_utility(Application, block_name)
+    if utility_name:
+        tube_path = f"\\Data\\Utilities\\{utility_name}\\Output\\UTL_IN_PRES"
+        tube_pressure = _read_raw_value(Application, tube_path)
+
+    return {
+        "shell_pressure_value": shell_pressure,
+        "shell_pressure_unit": pressure_unit,
+        "tube_pressure_value": tube_pressure,
+        "tube_pressure_unit": pressure_unit,
+    }
+
+def _get_heatx_pressures(Application, block_name: str, pressure_unit: str) -> Dict[str, Optional[float]]:
+    r"""HeatX의 셸/튜브 측 압력을 블록 출력에서 추출합니다.
+    - 튜브 측: HOT_PRES
+    - 셸 측: COLD_PRES
+    """
+    tube_pressure = _read_raw_value(Application, f"\\Data\\Blocks\\{block_name}\\Output\\HOT_PRES")
+    shell_pressure = _read_raw_value(Application, f"\\Data\\Blocks\\{block_name}\\Output\\COLD_PRES")
+    return {
+        "shell_pressure_value": shell_pressure,
+        "shell_pressure_unit": pressure_unit,
+        "tube_pressure_value": tube_pressure,
+        "tube_pressure_unit": pressure_unit,
+    }
+
 def _find_intercooler_utility(Application, block_name: str, stage_num: int) -> Optional[str]:
     """다단 압축기 블록의 특정 스테이지에서 사용하는 인터쿨러 유틸리티 이름을 찾습니다."""
     try:
@@ -400,29 +441,72 @@ def _read_raw_value(Application, node_path: str) -> Optional[float]:
 
 def _read_vessel_data(Application, block_name: str, pressure_unit: str, volume_unit: str, volumetric_flow_unit: str) -> Dict[str, any]:
     """용기(Vessel)의 압력과 부피 유량을 추출합니다."""
+    #
     extracted_data = {'max_pressure_value': None, 'max_pressure_unit': pressure_unit, 'max_flow_value': None, 'max_flow_unit': volumetric_flow_unit}
     stream_names = _get_stream_names(Application, block_name)
+    #
     
     max_pressure = -1.0
     max_flow = -1.0
     
     for stream_name in stream_names:
-        pressure_path = f"\\Data\\Blocks\\{block_name}\\Stream Results\\Table\\Pressure {pressure_unit} {stream_name}"
-        flow_path = f"\\Data\\Blocks\\{block_name}\\Stream Results\\Table\\Volume Flow {volumetric_flow_unit} {stream_name}"
-
-        pressure_raw = _read_raw_value(Application, pressure_path)
+        # 스트림별 부피유량 추출
+        flow_path = f"\\Data\\Streams\\{stream_name}\\Output\\RES_VOLFLOW"
         flow_raw = _read_raw_value(Application, flow_path)
+        #
+        
+        # 스트림별 압력 추출
+        pressure_path = f"\\Data\\Streams\\{stream_name}\\Output\\RES_PRES"
+        pressure_raw = _read_raw_value(Application, pressure_path)
+        #
 
         if pressure_raw is not None and pressure_raw > max_pressure:
             max_pressure = pressure_raw
         if flow_raw is not None and flow_raw > max_flow:
             max_flow = flow_raw
     
+    #
+    
     if max_pressure >= 0:
         extracted_data['max_pressure_value'] = max_pressure
     if max_flow >= 0:
         extracted_data['max_flow_value'] = max_flow
         
+    #
+    return extracted_data
+
+def _read_reactor_data(Application, block_name: str, pressure_unit: str, volume_unit: str, volumetric_flow_unit: str) -> Dict[str, any]:
+    """반응기(Reactor)의 압력과 부피 유량을 추출합니다."""
+    #
+    extracted_data = {'max_pressure_value': None, 'max_pressure_unit': pressure_unit, 'max_flow_value': None, 'max_flow_unit': volumetric_flow_unit}
+    stream_names = _get_stream_names(Application, block_name)
+    #
+    
+    max_pressure = -1.0
+    max_flow = -1.0
+    
+    # 압력은 블록의 R_PRES 노드에서 추출
+    pressure_path = f"\\Data\\Blocks\\{block_name}\\Output\\R_PRES"
+    pressure_raw = _read_raw_value(Application, pressure_path)
+    #
+    
+    for stream_name in stream_names:
+        # 스트림별 부피유량 추출 (새로운 노드 경로 사용)
+        flow_path = f"\\Data\\Streams\\{stream_name}\\Output\\RES_VOLFLOW"
+        flow_raw = _read_raw_value(Application, flow_path)
+        #
+
+        if flow_raw is not None and flow_raw > max_flow:
+            max_flow = flow_raw
+    
+    #
+    
+    if pressure_raw is not None and pressure_raw >= 0:
+        extracted_data['max_pressure_value'] = pressure_raw
+    if max_flow >= 0:
+        extracted_data['max_flow_value'] = max_flow
+        
+    #
     return extracted_data
 
 def _extract_mcompr_stage_data(Application, block_name: str, power_unit: Optional[str], pressure_unit: Optional[str], heat_unit: Optional[str], temperature_unit: Optional[str]) -> Dict[int, Dict[str, Optional[float]]]:
@@ -460,6 +544,8 @@ def _extract_mcompr_stage_data(Application, block_name: str, power_unit: Optiona
                         utility_inlet_temp = utility_data.get("inlet_temperature_value")
                         utility_outlet_temp = utility_data.get("outlet_temperature_value")
                         utility_temp_unit = utility_data.get("temperature_unit")
+                        # 유틸리티 압력 (튜브 측)도 함께 읽기
+                        utility_inlet_pres = _read_raw_value(Application, f"\\Data\\Utilities\\{cooler_utility}\\Output\\UTL_IN_PRES")
                         
                         if utility_inlet_temp is not None and utility_outlet_temp is not None and utility_temp_unit:
                             # 온도를 SI 단위로 변환 (K)
@@ -495,7 +581,9 @@ def _extract_mcompr_stage_data(Application, block_name: str, power_unit: Optiona
                 'cool_temp_unit': temperature_unit,
                 'q_value': q_calc_raw,
                 'q_unit': heat_unit,
-                'intercooler_lmtd': intercooler_lmtd
+                'intercooler_lmtd': intercooler_lmtd,
+                'utility_inlet_pressure_value': utility_inlet_pres if 'utility_inlet_pres' in locals() else None,
+                'utility_pressure_unit': pressure_unit
             }
     except Exception as e:
         print(f"Error extracting MCompr stage data for {block_name}: {e}", file=sys.stderr)
@@ -530,7 +618,7 @@ def extract_all_device_data(Application, block_info: Dict[str, str], unit_set_na
                 device_data = _extract_device_data(Application, name, cat, power_unit, pressure_unit, volumetric_flow_unit, heat_unit, heat_transfer_coeff_unit, temperature_unit, volume_unit)
                 all_devices_data.append(device_data)
             except Exception as e:
-                print(f"Debug: Failed to extract data for {name} ({cat}): {e}", file=sys.stderr)
+                #
                 import traceback
                 traceback.print_exc()
                 all_devices_data.append({"name": name, "category": cat, "error": f"Data extraction failed: {e}"})
@@ -542,9 +630,9 @@ def extract_all_device_data(Application, block_info: Dict[str, str], unit_set_na
                 "error": "Block type could not be classified - manual input required"
             })
         elif cat in ('Valve', 'Mixer', 'FSplit'):
-            all_devices_data.append({"name": name, "category": "Ignored", "error": "Device type ignored (Valve/Mixer/Splitter)"})
+            all_devices_data.append({"name": name, "category": "Ignored", "info": "Intentionally ignored (Valve/Mixer/Splitter)"})
         else:
-            all_devices_data.append({"name": name, "category": "Ignored", "error": "Unsupported device type"})
+            all_devices_data.append({"name": name, "category": "Ignored", "info": "Unsupported or non-costed device type"})
     
         
     return all_devices_data
@@ -650,6 +738,13 @@ def _extract_device_data(Application, name: str, cat: str, power_unit: str, pres
                 device["error"] = "Heat duty calculation failed or device has no heat exchange (possibly bypass condition)"
                 return device
             
+            # 압력 정보 추가 추출
+            shell_tube_press = None
+            if cat == 'Heater':
+                shell_tube_press = _get_heater_pressures(Application, name, pressure_unit)
+            elif cat == 'HeatX':
+                shell_tube_press = _get_heatx_pressures(Application, name, pressure_unit)
+
             device.update({
                 "heat_duty_value": q_raw,
                 "heat_duty_unit": heat_unit,
@@ -663,19 +758,30 @@ def _extract_device_data(Application, name: str, cat: str, power_unit: str, pres
                 "selected_subtype": heat_exchanger_type,
                 "shell_material": config.DEFAULT_MATERIAL,
                 "tube_material": config.DEFAULT_MATERIAL,
+                # 압력 정보 (Heater 한정; HeatX는 추후 필요 시 확장)
+                **(shell_tube_press or {}),
             })
             
         elif cat in ('RStoic', 'RCSTR', 'RPlug', 'RBatch', 'REquil', 'RYield'):
-            v_data = _read_vessel_data(Application, name, pressure_unit, volume_unit, volumetric_flow_unit)
+            v_data = _read_reactor_data(Application, name, pressure_unit, volume_unit, volumetric_flow_unit)
+            
+            # 체적 계산: V = Q × τ (부피유량 × 체류시간)
+            residence_time_hours = 2.0  # 기본 체류시간 2시간
+            calculated_volume = None
+            if v_data['max_flow_value'] is not None:
+                # 부피유량을 m³/hr로 변환
+                flow_m3hr = unit_converter.convert_units(v_data['max_flow_value'], v_data['max_flow_unit'], 'cum/hr', 'VOLUME-FLOW')
+                if flow_m3hr is not None:
+                    calculated_volume = flow_m3hr * residence_time_hours
             
             device.update({
-                "volume_value": None,  # 체적 계산은 cost_calculator에서 수행
+                "volume_value": calculated_volume,
                 "volume_unit": volume_unit,
                 "operating_pressure_value": v_data['max_pressure_value'],
                 "operating_pressure_unit": v_data['max_pressure_unit'],
-                "mass_flow_value": v_data['max_flow_value'],
-                "mass_flow_unit": v_data['max_flow_unit'],
-                "residence_time_hours_value": 2.0,  # 체류시간 설정값 전달
+                "volumetric_flow_value": v_data['max_flow_value'],
+                "volumetric_flow_unit": v_data['max_flow_unit'],
+                "residence_time_hours_value": residence_time_hours,
                 "material": config.DEFAULT_MATERIAL,
                 "selected_type": "reactor",
                 "selected_subtype": "autoclave",
@@ -684,14 +790,24 @@ def _extract_device_data(Application, name: str, cat: str, power_unit: str, pres
         elif cat in ('Flash', 'Sep'):
             v_data = _read_vessel_data(Application, name, pressure_unit, volume_unit, volumetric_flow_unit)
             
+            # 체적 계산: V = Q × τ (부피유량 × 체류시간)
+            residence_time_minutes = 5.0  # 기본 체류시간 5분
+            calculated_volume = None
+            if v_data['max_flow_value'] is not None:
+                # 부피유량을 m³/hr로 변환
+                flow_m3hr = unit_converter.convert_units(v_data['max_flow_value'], v_data['max_flow_unit'], 'cum/hr', 'VOLUME-FLOW')
+                if flow_m3hr is not None:
+                    residence_time_hours = residence_time_minutes / 60.0  # 분을 시간으로 변환
+                    calculated_volume = flow_m3hr * residence_time_hours
+            
             device.update({
-                "volume_value": None,  # 체적 계산은 cost_calculator에서 수행
+                "volume_value": calculated_volume,
                 "volume_unit": volume_unit,
                 "operating_pressure_value": v_data['max_pressure_value'],
                 "operating_pressure_unit": v_data['max_pressure_unit'],
-                "mass_flow_value": v_data['max_flow_value'],
-                "mass_flow_unit": v_data['max_flow_unit'],
-                "residence_time_minutes_value": 5.0,  # 체류시간 설정값 전달
+                "volumetric_flow_value": v_data['max_flow_value'],
+                "volumetric_flow_unit": v_data['max_flow_unit'],
+                "residence_time_minutes_value": residence_time_minutes,
                 "material": config.DEFAULT_MATERIAL,
                 "selected_type": "vessel",
                 "selected_subtype": "vertical",

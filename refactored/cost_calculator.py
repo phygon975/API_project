@@ -98,6 +98,12 @@ class CostInputs:
     shell_material: Optional[str] = None
     tube_material: Optional[str] = None
     
+    # 열교환기 압력(셸/튜브) — Fp 계산용
+    shell_pressure_value: Optional[float] = None
+    shell_pressure_unit: Optional[str] = None
+    tube_pressure_value: Optional[float] = None
+    tube_pressure_unit: Optional[str] = None
+    
     
 # =============================================================================
 # 내부 계산 헬퍼 함수들
@@ -206,6 +212,40 @@ def _calc_fp_from_coeffs(P_value: float, C1: float, C2: float, C3: float) -> flo
         return 10.0 ** logFp
     except (ValueError, ZeroDivisionError):
         return 1.0
+
+def _resolve_pressure_factor_with_details(
+    equipment_type: str,
+    subtype: str,
+    pressure: Optional[float],
+    pressure_type: str
+) -> (float, Optional[dict]):
+    """압력 계수(Fp)와 상세 계산 정보를 함께 반환합니다.
+    details = { 'c1':..., 'c2':..., 'c3':..., 'min':..., 'max':..., 'p_used':... }
+    """
+    settings = config.get_equipment_setting(equipment_type, subtype)
+    calc_method = settings.get("pressure_calc_method", "coefficient")
+    if pressure is None:
+        return 1.0, None
+    if calc_method == "coefficient":
+        pressure_ranges = settings.get("pressure_ranges", [])
+        for p_range in pressure_ranges:
+            min_p, max_p = p_range.get("min"), p_range.get("max")
+            p_value = pressure
+            if p_range.get("unit") == "kPa" and pressure_type == "pressure_difference":
+                p_value = pressure * 100
+            if (min_p is None or p_value >= min_p) and (max_p is None or p_value < max_p):
+                c1, c2, c3 = p_range["c1"], p_range["c2"], p_range["c3"]
+                fp = max(_calc_fp_from_coeffs(p_value, c1, c2, c3), 1.0)
+                return fp, {
+                    "c1": c1, "c2": c2, "c3": c3,
+                    "min": min_p, "max": max_p,
+                    "p_used": p_value,
+                    "unit": p_range.get("unit", "barg")
+                }
+        return 1.0, None
+    elif calc_method == "formula" and equipment_type == "vessel":
+        return _calculate_vessel_pressure_factor(subtype, pressure, None), None
+    return 1.0, None
 
 def _calculate_vessel_pressure_factor(subtype: str, pressure: Optional[float], diameter: Optional[float]) -> float:
     """Vessel의 압력 계수를 직접 계산식으로 계산합니다."""
@@ -486,6 +526,11 @@ def estimate_mcompr_cost(inputs: CostInputs, cepci: CEPCIOptions, Application=No
                     selected_subtype="fixed_tube",
                     shell_material=config.DEFAULT_MATERIAL,
                     tube_material=config.DEFAULT_MATERIAL,
+                    # 압력 전달 (shell=프로세스 압력, tube=유틸리티 압력)
+                    shell_pressure_value=data.get("pressure_value"),
+                    shell_pressure_unit=data.get("pressure_unit"),
+                    tube_pressure_value=data.get("utility_inlet_pressure_value"),
+                    tube_pressure_unit=data.get("utility_pressure_unit"),
                     heat_duty_value=abs_q_value,
                     heat_duty_unit=q_unit,
                     heat_transfer_coefficient_value=850.0,
@@ -557,7 +602,7 @@ def estimate_heat_exchanger_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dic
             q_watt = unit_converter.convert_units(heat_duty_value, heat_duty_unit, 'Watt', 'ENTHALPY-FLO')
             u_si = unit_converter.convert_units(htc_value, htc_unit, 'Watt/sqm-K', 'HEAT-TRANS-C')
             lmtd_si = unit_converter.convert_units(lmtd_value, lmtd_unit, 'K', 'DELTA-T')
-            _push(debug_steps, f"Q={heat_duty_value:.2f} {heat_duty_unit} → {q_watt:.2f} W, U={htc_value:.2f} {htc_unit} → {u_si:.2f} W/m²·K, ΔTlm={lmtd_value:.2f} {lmtd_unit} → {lmtd_si:.2f} K")
+            _push(debug_steps, f"Q={heat_duty_value:.2f} {heat_duty_unit} → {q_watt:.2f} Watt, U={htc_value:.2f} {htc_unit} → {u_si:.2f} Watt/sqm-K, ΔTlm={lmtd_value:.2f} {lmtd_unit} → {lmtd_si:.2f} K")
         except Exception as e:
             raise ValueError(f"Unit conversion error for heat exchanger ({subtype}): {e}")
         
@@ -601,10 +646,52 @@ def estimate_heat_exchanger_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dic
         "heat_exchanger", subtype, inputs.material,
         shell_material=inputs.shell_material, tube_material=inputs.tube_material
     )
-    # 압력 인자는 열교환기에서는 기본값 사용
-    fp = 1.0  # 열교환기는 일반적으로 낮은 압력
+    # 압력 인자: Heater/HeatX에서 제공된 셸/튜브 압력으로 범위 매칭 (게이지 압력 가정)
+    fp = 1.0
+    fp_details = None
+    shell_p = getattr(inputs, 'shell_pressure_value', None)
+    tube_p = getattr(inputs, 'tube_pressure_value', None)
+    # 규칙: shell 측 압력이 tube 측보다 높으면, 압력이 높은 측을 tube로 간주
+    if shell_p is not None and tube_p is not None and shell_p > tube_p:
+        shell_p, tube_p = tube_p, shell_p
+        _push(debug_steps, "Pressure sides normalized: higher pressure treated as tube side")
+    # 우선 높은 압력 쪽으로 보수적 적용
+    p_basis = None
+    if shell_p is not None and tube_p is not None:
+        p_basis = max(shell_p, tube_p)
+    elif shell_p is not None:
+        p_basis = shell_p
+    elif tube_p is not None:
+        p_basis = tube_p
+    if p_basis is not None:
+        # 모드 선택: air_cooler는 전용, 그 외는 tube_only/both_sides 판단
+        mode_key = None
+        if subtype == 'air_cooler':
+            mode_key = 'air_cooler'
+        else:
+            # tube_only: tube>=5 barg 그리고 shell<5 barg
+            if tube_p is not None and tube_p >= 5.0 and (shell_p is None or shell_p < 5.0):
+                mode_key = 'tube_only'
+            # both_sides: tube>=5 barg 그리고 shell>=5 barg
+            elif tube_p is not None and tube_p >= 5.0 and shell_p is not None and shell_p >= 5.0:
+                mode_key = 'both_sides'
+        # 모드가 지정되면 해당 모드의 pressure_ranges를 임시로 적용
+        settings = config.get_equipment_setting("heat_exchanger", subtype)
+        pressure_ranges_backup = settings.get('pressure_ranges')
+        if mode_key and 'pressure_modes' in settings and mode_key in settings['pressure_modes']:
+            settings['pressure_ranges'] = settings['pressure_modes'][mode_key]
+        fp, fp_details = _resolve_pressure_factor_with_details("heat_exchanger", subtype, p_basis, "gauge")
+        mode_used = mode_key or 'default'
+        # 원복
+        if pressure_ranges_backup is not None:
+            settings['pressure_ranges'] = pressure_ranges_backup
     
     b1, b2 = settings.get("bm_factors_b1b2")
+    if fp_details:
+        side_label = 'tube_only' if (tube_p is not None and tube_p >= 5.0 and (shell_p is None or shell_p < 5.0)) else (
+            'both_sides' if (tube_p is not None and tube_p >= 5.0 and shell_p is not None and shell_p >= 5.0) else (
+            'air_cooler' if subtype == 'air_cooler' else 'default'))
+        _push(debug_steps, f"Fp[{side_label}] range=({fp_details['min']},{fp_details['max']}) {fp_details['unit']}, c1={fp_details['c1']:.5f}, c2={fp_details['c2']:.5f}, c3={fp_details['c3']:.5f}, P={fp_details['p_used']}")
     _push(debug_steps, f"Fm={fm:.2f} (Shell={inputs.shell_material}, Tube={inputs.tube_material}), Fp={fp:.2f}; BM = {b1} + {b2}·Fm·Fp")
     effective_bm = b1 + b2 * fm * fp
     bare_module_cost = purchased_adj * effective_bm
@@ -631,7 +718,7 @@ def estimate_vessel_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, A
     volume_unit = inputs.volume_unit
     diameter_value = inputs.diameter_value
     diameter_unit = inputs.diameter_unit
-
+    
     if volume_value is None or volume_unit is None:
         raise ValueError(f"Missing volume value or unit for vessel ({subtype})")
     
@@ -755,7 +842,7 @@ def estimate_reactor_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, 
 
     _push(debug_steps, f"logC(S={volume_cum:.2f}) = {coeffs['k1']:.4f} + {coeffs['k2']:.4f}·log10(S) + {coeffs['k3']:.4f}·log10(S)^2")
     purchased_base = _eval_log_quadratic_cost(volume_cum, coeffs)
-    _push(debug_steps, f"Purchased base (2001) = {purchased_base:.2f}")
+    _push(debug_steps, f"Purchased base (2001, CEPCI=397) = {purchased_base:,.2f}")
     purchased_adj = _adjust_cost_to_index(purchased_base, cepci.base_index, cepci.target_index)
     _push(debug_steps, f"CEPCI adjusted (target={cepci.target_index}) = {purchased_adj:,.2f}")
     
@@ -787,6 +874,9 @@ def calculate_all_costs_with_data(all_device_data: List[Dict], cepci: CEPCIOptio
         
         if device.get("error"):
             results.append({"name": name, "category": category, "error": device.get("error")})
+            continue
+        if category == 'Ignored':
+            results.append({"name": name, "category": category, "info": device.get("info", "Intentionally ignored")})
             continue
             
         try:
@@ -821,6 +911,10 @@ def calculate_all_costs_with_data(all_device_data: List[Dict], cepci: CEPCIOptio
                 stage_data=device.get("stage_data"),
                 shell_material=device.get("shell_material"),
                 tube_material=device.get("tube_material"),
+                shell_pressure_value=device.get("shell_pressure_value"),
+                shell_pressure_unit=device.get("shell_pressure_unit"),
+                tube_pressure_value=device.get("tube_pressure_value"),
+                tube_pressure_unit=device.get("tube_pressure_unit"),
             )
             
             costs = {}
@@ -844,7 +938,7 @@ def calculate_all_costs_with_data(all_device_data: List[Dict], cepci: CEPCIOptio
             elif category in ('RStoic', 'RCSTR', 'RPlug', 'RBatch', 'REquil', 'RYield'):
                 costs = estimate_reactor_cost(inputs, cepci)
             else:
-                costs = {"error": "Unsupported device category"}
+                costs = {"info": "Unsupported or non-costed device type"} if category == 'Ignored' else {"error": "Unsupported device category"}
                 
             costs["name"] = name
             costs["category"] = category

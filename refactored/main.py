@@ -173,9 +173,9 @@ def print_detailed_analysis(all_devices: List[Dict]):
                 "A = Q / (U · ΔT_lm)",
             ]
             if q_val is not None and q_unit:
-                steps.append(f"  Q = {q_val} {q_unit} → {q_w} W")
+                steps.append(f"  Q = {q_val} {q_unit} → {q_w} Watt")
             if u_val is not None and u_unit:
-                steps.append(f"  U = {u_val} {u_unit} → {u_si} W/m²·K")
+                steps.append(f"  U = {u_val} {u_unit} → {u_si} Watt/sqm-K")
             if lmtd_val is not None and lmtd_unit:
                 steps.append(f"  ΔT_lm = {lmtd_val} {lmtd_unit} → {dt_k} K")
 
@@ -667,7 +667,12 @@ def main():
             # final_devices_to_calc는 외부 스코프 변수이므로 참조
             eq_type = next((d.get('selected_type') for d in final_devices_to_calc if d.get('name') == name), None)
             sub = next((d.get('selected_subtype') for d in final_devices_to_calc if d.get('name') == name), None)
+            info_msg = res.get("info")
             err = res.get("error")
+            if info_msg:
+                if v >= 1:
+                    print(f"  - {name} ({eq_type}/{sub}) | {info_msg}")
+                continue
             if err:
                 if v >= 1:
                     print(f"  - {name} ({eq_type}/{sub}) | ERROR: {err}")
@@ -690,7 +695,13 @@ def main():
         cost = res.get("bare_module_cost")
         # 장치 카테고리 정보 가져오기
         eq_type = next((d.get('selected_type') for d in final_devices_to_calc if d.get('name') == name), None)
-        if cost is not None:
+        info_msg = res.get("info")
+        if info_msg is not None:
+            if eq_type:
+                print(f"  - {name:<20} | {info_msg} ({eq_type})")
+            else:
+                print(f"  - {name:<20} | {info_msg}")
+        elif cost is not None:
             if eq_type:
                 print(f"  - {name:<20} | Bare Module Cost: ${cost:,.2f} ({eq_type})")
             else:

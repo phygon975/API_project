@@ -178,6 +178,13 @@ EQUIPMENT_SETTINGS = {
                 {"min": 40.0, "max": 100.0, "c1": 0.6072, "c2": -0.9120, "c3": 0.3327, "type": "gauge", "unit": "barg"},
                 {"min": 100.0, "max": 300.0, "c1": 13.1467, "c2": -12.6574, "c3": 3.0705, "type": "gauge", "unit": "barg"}
             ],
+            "pressure_modes": {
+                "default": [
+                    {"min": None, "max": 40.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 40.0, "max": 100.0, "c1": 0.6072, "c2": -0.9120, "c3": 0.3327, "type": "gauge", "unit": "barg"},
+                    {"min": 100.0, "max": 300.0, "c1": 13.1467, "c2": -12.6574, "c3": 3.0705, "type": "gauge", "unit": "barg"}
+                ]
+            },
             "pressure_calc_method": "coefficient"
         },
         "multiple_pipe": {
@@ -191,6 +198,13 @@ EQUIPMENT_SETTINGS = {
                 {"min": 40.0, "max": 100.0, "c1": 0.6072, "c2": -0.9120, "c3": 0.3327, "type": "gauge", "unit": "barg"},
                 {"min": 100.0, "max": 300.0, "c1": 13.1467, "c2": -12.6574, "c3": 3.0705, "type": "gauge", "unit": "barg"}
             ],
+            "pressure_modes": {
+                "default": [
+                    {"min": None, "max": 40.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 40.0, "max": 100.0, "c1": 0.6072, "c2": -0.9120, "c3": 0.3327, "type": "gauge", "unit": "barg"},
+                    {"min": 100.0, "max": 300.0, "c1": 13.1467, "c2": -12.6574, "c3": 3.0705, "type": "gauge", "unit": "barg"}
+                ]
+            },
             "pressure_calc_method": "coefficient"
         },
         "fixed_tube": {
@@ -203,6 +217,19 @@ EQUIPMENT_SETTINGS = {
                 {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
                 {"min": 5.0, "max": 140.0, "c1": -0.00164, "c2": -0.00627, "c3": 0.0123, "type": "gauge", "unit": "barg"}
             ],
+            "pressure_modes": {
+                "tube_only": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 5.0, "max": 140.0, "c1": -0.00164, "c2": -0.00627, "c3": 0.0123, "type": "gauge", "unit": "barg"}
+                ],
+                "both_sides": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 5.0, "max": 140.0, "c1": 0.03881, "c2": -0.11272, "c3": 0.08183, "type": "gauge", "unit": "barg"}
+                ],
+                "default": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"}
+                ]
+            },
             "pressure_calc_method": "coefficient"
         },
         "floating_head": {
@@ -215,6 +242,19 @@ EQUIPMENT_SETTINGS = {
                 {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
                 {"min": 5.0, "max": 140.0, "c1": -0.00164, "c2": -0.00627, "c3": 0.0123, "type": "gauge", "unit": "barg"}
             ],
+            "pressure_modes": {
+                "tube_only": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 5.0, "max": 140.0, "c1": -0.00164, "c2": -0.00627, "c3": 0.0123, "type": "gauge", "unit": "barg"}
+                ],
+                "both_sides": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 5.0, "max": 140.0, "c1": 0.03881, "c2": -0.11272, "c3": 0.08183, "type": "gauge", "unit": "barg"}
+                ],
+                "default": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"}
+                ]
+            },
             "pressure_calc_method": "coefficient"
         },
         "bayonet": {
@@ -227,6 +267,19 @@ EQUIPMENT_SETTINGS = {
                 {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
                 {"min": 5.0, "max": 140.0, "c1": -0.00164, "c2": -0.00627, "c3": 0.0123, "type": "gauge", "unit": "barg"}
             ],
+            "pressure_modes": {
+                "tube_only": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 5.0, "max": 140.0, "c1": -0.00164, "c2": -0.00627, "c3": 0.0123, "type": "gauge", "unit": "barg"}
+                ],
+                "both_sides": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 5.0, "max": 140.0, "c1": 0.03881, "c2": -0.11272, "c3": 0.08183, "type": "gauge", "unit": "barg"}
+                ],
+                "default": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"}
+                ]
+            },
             "pressure_calc_method": "coefficient"
         },
         "kettle_reboiler": {
@@ -239,6 +292,19 @@ EQUIPMENT_SETTINGS = {
                 {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
                 {"min": 5.0, "max": 140.0, "c1": -0.00164, "c2": -0.00627, "c3": 0.0123, "type": "gauge", "unit": "barg"}
             ],
+            "pressure_modes": {
+                "tube_only": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 5.0, "max": 140.0, "c1": -0.00164, "c2": -0.00627, "c3": 0.0123, "type": "gauge", "unit": "barg"}
+                ],
+                "both_sides": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 5.0, "max": 140.0, "c1": 0.03881, "c2": -0.11272, "c3": 0.08183, "type": "gauge", "unit": "barg"}
+                ],
+                "default": [
+                    {"min": None, "max": 5.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"}
+                ]
+            },
             "pressure_calc_method": "coefficient"
         },
         "scraped_wall": {
@@ -272,6 +338,12 @@ EQUIPMENT_SETTINGS = {
                 {"min": None, "max": 10.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
                 {"min": 10.0, "max": 100.0, "c1": -0.1250, "c2": 0.15361, "c3": -0.02861, "type": "gauge", "unit": "barg"}
             ],
+            "pressure_modes": {
+                "air_cooler": [
+                    {"min": None, "max": 10.0, "c1": 0.0, "c2": 0.0, "c3": 0.0, "type": "gauge", "unit": "barg"},
+                    {"min": 10.0, "max": 100.0, "c1": -0.1250, "c2": 0.15361, "c3": -0.02861, "type": "gauge", "unit": "barg"}
+                ]
+            },
             "pressure_calc_method": "coefficient"
         },
         "spiral_tube": {
