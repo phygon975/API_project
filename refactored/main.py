@@ -140,23 +140,8 @@ def print_detailed_analysis(all_devices: List[Dict]):
                 basics.append(f"Vol={dev['volume_value']} {dev.get('volume_unit','')}")
             print(f"  - {name:<20} | " + " | ".join(basics))
 
-        # v>=2: 중간 계산 변수/단위 타입
-        if v >= 2:
-            mid = []
-            if dev.get('heat_transfer_coefficient_value') is not None:
-                mid.append(f"U={dev['heat_transfer_coefficient_value']} {dev.get('heat_transfer_coefficient_unit','')}")
-            if dev.get('log_mean_temp_difference_value') is not None:
-                lmtd_unit = dev.get('log_mean_temp_difference_unit','')
-                lmtd_utype = dev.get('log_mean_temp_difference_unit_type','')
-                if lmtd_utype:
-                    mid.append(f"LMTD={dev['log_mean_temp_difference_value']} {lmtd_unit} [{lmtd_utype}]")
-                else:
-                    mid.append(f"LMTD={dev['log_mean_temp_difference_value']} {lmtd_unit}")
-            if mid:
-                print(f"    · Vars: " + ", ".join(mid))
-
-        # v>=3: 계산 과정 (핵심 수식과 수치 대입)
-        if v >= 3 and eq_type == 'heat_exchanger':
+        # v>=2: 계산 과정 (핵심 수식과 수치 대입)
+        if v >= 2 and eq_type == 'heat_exchanger':
             q_val = dev.get('heat_duty_value')
             q_unit = dev.get('heat_duty_unit')
             u_val = dev.get('heat_transfer_coefficient_value')
@@ -182,7 +167,7 @@ def print_detailed_analysis(all_devices: List[Dict]):
             area = None
             if q_w is not None and u_si not in (None, 0) and dt_k not in (None, 0):
                 area = q_w / (u_si * dt_k)
-                steps.append(f"  A = {q_w} / ({u_si} · {dt_k}) = {area:.4f} m²")
+                steps.append(f"  A = {q_w} / ({u_si} · {dt_k}) = {area:.2f} m²")
             else:
                 steps.append("  A 계산 불가 (입력 부족 또는 0)")
 
@@ -297,7 +282,7 @@ def main():
 
     # 2.5. Verbosity 설정 (사용자 입력, 기본값은 config.DEFAULT_VERBOSITY)
     try:
-        v_in = input(f"로그 상세 레벨을 설정하세요 (0-3, 기본 {config.DEFAULT_VERBOSITY}): ").strip()
+        v_in = input(f"로그 상세 레벨을 설정하세요 (0-2, 기본 {config.DEFAULT_VERBOSITY}): ").strip()
         if v_in != '':
             logger.set_verbosity(int(v_in))
     except Exception:
@@ -676,10 +661,17 @@ def main():
             if err:
                 if v >= 1:
                     print(f"  - {name} ({eq_type}/{sub}) | ERROR: {err}")
+                if v >= 2:
+                    # 에러 디버깅 정보 출력
+                    error_debug_steps = res.get("error_debug") or []
+                    if error_debug_steps:
+                        print(f"      Error Details:")
+                        for s in error_debug_steps:
+                            print(f"      · {s}")
                 continue
             if v >= 1:
                 print(f"  - {name} ({eq_type}/{sub})")
-            if v >= 3:
+            if v >= 2:
                 steps = res.get("debug_steps") or []
                 for s in steps:
                     print(f"      · {s}")
@@ -690,30 +682,45 @@ def main():
     print("\n" + "=" * 80)
     print("CALCULATED EQUIPMENT COSTS")
     print("=" * 80)
+    
+    # 테이블 헤더
+    print(f"  {'Equipment Name':<20} {'Type':<20} {'Cost/Status':>36}")
+    print("  " + "─" * 76)
+    
     for res in cost_results["results"]:
         name = res.get("name")
         cost = res.get("bare_module_cost")
+        category = res.get("category")
+        
         # 장치 카테고리 정보 가져오기
+        # selected_type이 있으면 그것을 사용, 없으면 category 사용
         eq_type = next((d.get('selected_type') for d in final_devices_to_calc if d.get('name') == name), None)
+        if not eq_type and category:
+            # 무시된 장치나 에러가 발생한 장치의 경우 category 사용
+            eq_type = category
+        eq_type_str = eq_type if eq_type else ""
+        
         info_msg = res.get("info")
         if info_msg is not None:
-            if eq_type:
-                print(f"  - {name:<20} | {info_msg} ({eq_type})")
-            else:
-                print(f"  - {name:<20} | {info_msg}")
+            # 의도적으로 무시되거나 지원되지 않는 장치
+            print(f"  {name:<20} {eq_type_str:<20} {info_msg:>36}")
         elif cost is not None:
-            if eq_type:
-                print(f"  - {name:<20} | Bare Module Cost: ${cost:,.2f} ({eq_type})")
-            else:
-                print(f"  - {name:<20} | Bare Module Cost: ${cost:,.2f}")
+            # 정상 계산된 장치
+            cost_str = f"${cost:,.0f}"
+            print(f"  {name:<20} {eq_type_str:<20} {cost_str:>36}")
         else:
-            if eq_type:
-                print(f"  - {name:<20} | ERROR: {res.get('error', 'Unknown Error')} ({eq_type})")
+            # 에러가 발생한 장치
+            error_msg = res.get('error', 'Unknown Error')
+            # 에러 메시지가 너무 길면 잘라내기
+            if len(error_msg) > 36:
+                error_msg = "ERROR: " + error_msg[:30] + "..."
             else:
-                print(f"  - {name:<20} | ERROR: {res.get('error', 'Unknown Error')}")
-    print("-" * 80)
+                error_msg = "ERROR: " + error_msg
+            print(f"  {name:<20} {eq_type_str:<20} {error_msg:>36}")
+    
+    print("  " + "─" * 76)
     total = cost_results["total_bare_module_cost"]
-    print(f"TOTAL BARE MODULE COST: ${total:,.2f}")
+    print(f"  {'TOTAL BARE MODULE COST':<42} {'$' + f'{total:,.0f}':>34}")
     print("=" * 80)
 
 if __name__ == "__main__":

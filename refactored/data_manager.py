@@ -630,7 +630,7 @@ def extract_all_device_data(Application, block_info: Dict[str, str], unit_set_na
                 "error": "Block type could not be classified - manual input required"
             })
         elif cat in ('Valve', 'Mixer', 'FSplit'):
-            all_devices_data.append({"name": name, "category": "Ignored", "info": "Intentionally ignored (Valve/Mixer/Splitter)"})
+            all_devices_data.append({"name": name, "category": cat, "info": "Intentionally ignored"})
         else:
             all_devices_data.append({"name": name, "category": "Ignored", "info": "Unsupported or non-costed device type"})
     
@@ -715,7 +715,7 @@ def _extract_device_data(Application, name: str, cat: str, power_unit: str, pres
             
             # Heat duty 노드는 블록 타입에 따라 다름
             if cat == 'Heater':
-                q_raw = _read_raw_value(Application, f"\\Data\\Blocks\\{name}\\Output\\QNET")
+                q_raw = _read_raw_value(Application, f"\\Data\\Blocks\\{name}\\Output\\QCALC")
                 # Heater의 경우 계산된 LMTD만 사용
                 calculated_lmtd = _calculate_lmtd_for_heater(Application, name, temperature_unit)
                 if calculated_lmtd is None:

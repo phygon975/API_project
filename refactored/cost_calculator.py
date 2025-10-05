@@ -297,7 +297,7 @@ def estimate_pump_cost(inputs: CostInputs, cepci: CEPCIOptions, _split: bool = T
         raise ValueError(f"Missing power value or power unit for pump ({subtype})")
     
     power_kw = unit_converter.convert_units(inputs.power_value, inputs.power_unit, 'kW', 'POWER')
-    _push(debug_steps, f"size S=Power={inputs.power_value} {inputs.power_unit} → {power_kw:.2f} kW")
+    _push(debug_steps, f"size S=Power={inputs.power_value:.2f} {inputs.power_unit} → {power_kw:.2f} kW")
 
     if power_kw <= 0:
         raise ValueError(f"Invalid power after conversion for pump ({subtype})")
@@ -341,9 +341,9 @@ def estimate_pump_cost(inputs: CostInputs, cepci: CEPCIOptions, _split: bool = T
     
     _push(debug_steps, f"Factors: Fm={fm:.2f} ({inputs.material}), Fp={fp:.2f}")
     effective_bm = b1 + b2 * fm * fp
-    _push(debug_steps, f"BM = {b1} + {b2}·Fm·Fp = {effective_bm:.3f}")
+    _push(debug_steps, f"BM = {b1} + {b2}·Fm·Fp = {effective_bm:.2f}")
     bare_module_cost = purchased_adj * effective_bm
-    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.2f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -366,7 +366,7 @@ def estimate_compressor_cost(inputs: CostInputs, cepci: CEPCIOptions, _split: bo
         raise ValueError(f"Missing power value or power unit for compressor ({subtype})")
     
     power_kw = unit_converter.convert_units(inputs.power_value, inputs.power_unit, 'kW', 'POWER')
-    _push(debug_steps, f"size S=Power={inputs.power_value} {inputs.power_unit} → {power_kw} kW")
+    _push(debug_steps, f"size S=Power={inputs.power_value:.2f} {inputs.power_unit} → {power_kw:.2f} kW")
 
     if power_kw <= 0:
         raise ValueError(f"Invalid power after conversion for compressor ({subtype})")
@@ -396,11 +396,11 @@ def estimate_compressor_cost(inputs: CostInputs, cepci: CEPCIOptions, _split: bo
     
     fixed_bm_factors = settings.get("bm_factors_fixed")
     effective_bm = fixed_bm_factors.get(inputs.material, fixed_bm_factors.get(config.DEFAULT_MATERIAL))
-    _push(debug_steps, f"BM = fixed(material={inputs.material}) = {effective_bm:.3f}")
+    _push(debug_steps, f"BM = fixed(material={inputs.material}) = {effective_bm:.2f}")
     
     bare_module_cost = purchased_adj * effective_bm
-    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
-    _push(debug_steps, f"BM={effective_bm:.3f}; Bare Module Cost = {bare_module_cost:,.2f}")
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.2f} = {bare_module_cost:,.2f}")
+    _push(debug_steps, f"BM={effective_bm:.2f}; Bare Module Cost = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -442,9 +442,9 @@ def estimate_fan_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, Any]
     
     fp = _resolve_pressure_factor("fan", subtype, inputs.pressure_drop_value, "pressure_difference")
     effective_bm_with_fp = effective_bm * fp
-    _push(debug_steps, f"BM = fixed(material={inputs.material})·Fp = {effective_bm:.3f}·{fp:.2f} = {effective_bm_with_fp:.3f}")
+    _push(debug_steps, f"BM = fixed(material={inputs.material})·Fp = {effective_bm:.2f}·{fp:.2f} = {effective_bm_with_fp:.2f}")
     bare_module_cost = purchased_adj * effective_bm_with_fp
-    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm_with_fp:.3f} = {bare_module_cost:,.2f}")
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm_with_fp:.2f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -599,7 +599,7 @@ def estimate_heat_exchanger_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dic
             raise ValueError(f"Missing log mean temperature difference value or unit for heat exchanger ({subtype})")
         
         try:
-            q_watt = unit_converter.convert_units(heat_duty_value, heat_duty_unit, 'Watt', 'ENTHALPY-FLO')
+            q_watt = abs(unit_converter.convert_units(heat_duty_value, heat_duty_unit, 'Watt', 'ENTHALPY-FLO'))
             u_si = unit_converter.convert_units(htc_value, htc_unit, 'Watt/sqm-K', 'HEAT-TRANS-C')
             lmtd_si = unit_converter.convert_units(lmtd_value, lmtd_unit, 'K', 'DELTA-T')
             _push(debug_steps, f"Q={heat_duty_value:.2f} {heat_duty_unit} → {q_watt:.2f} Watt, U={htc_value:.2f} {htc_unit} → {u_si:.2f} Watt/sqm-K, ΔTlm={lmtd_value:.2f} {lmtd_unit} → {lmtd_si:.2f} K")
@@ -612,7 +612,7 @@ def estimate_heat_exchanger_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dic
         # Watt 단위의 열부하를 면적 계산에 사용: A = Q / (U × ΔT)
         # 여기서 Q는 Watt (J/sec), U는 Watt/sqm-K, ΔT는 K
         area_sqm = q_watt / (u_si * lmtd_si)
-        _push(debug_steps, f"A = Q/(U·ΔTlm) = {q_watt:.2f}/({u_si:.2f}·{lmtd_si:.2f}) = {area_sqm:.4f} m²")
+        _push(debug_steps, f"A = Q/(U·ΔTlm) = {q_watt:.2f}/({u_si:.2f}·{lmtd_si:.2f}) = {area_sqm:.2f} m²")
     
     if area_sqm <= 0:
         raise ValueError(f"Invalid calculated area for heat exchanger ({subtype})")
@@ -695,7 +695,7 @@ def estimate_heat_exchanger_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dic
     _push(debug_steps, f"Fm={fm:.2f} (Shell={inputs.shell_material}, Tube={inputs.tube_material}), Fp={fp:.2f}; BM = {b1} + {b2}·Fm·Fp")
     effective_bm = b1 + b2 * fm * fp
     bare_module_cost = purchased_adj * effective_bm
-    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.2f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -785,10 +785,10 @@ def estimate_vessel_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, A
     fp = _resolve_pressure_factor("vessel", subtype, pressure_bar, "gauge", diameter=diameter_m)
     
     b1, b2 = settings.get("bm_factors_b1b2")
-    _push(debug_steps, f"Fm={fm:.3f}, Fp={fp:.3f}; BM = {b1} + {b2}·Fm·Fp")
+    _push(debug_steps, f"Fm={fm:.2f}, Fp={fp:.2f}; BM = {b1} + {b2}·Fm·Fp")
     effective_bm = b1 + b2 * fm * fp
     bare_module_cost = purchased_adj * effective_bm
-    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.2f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -848,9 +848,10 @@ def estimate_reactor_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, 
     
     fixed_bm_factors = settings.get("bm_factors_fixed")
     effective_bm = fixed_bm_factors.get(inputs.material, fixed_bm_factors.get(config.DEFAULT_MATERIAL))
+    _push(debug_steps, f"BM = fixed(material={inputs.material}) = {effective_bm:.2f}")
     
     bare_module_cost = purchased_adj * effective_bm
-    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.2f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
@@ -875,7 +876,7 @@ def calculate_all_costs_with_data(all_device_data: List[Dict], cepci: CEPCIOptio
         if device.get("error"):
             results.append({"name": name, "category": category, "error": device.get("error")})
             continue
-        if category == 'Ignored':
+        if category in ('Ignored', 'Valve', 'Mixer', 'FSplit'):
             results.append({"name": name, "category": category, "info": device.get("info", "Intentionally ignored")})
             continue
             
@@ -946,7 +947,38 @@ def calculate_all_costs_with_data(all_device_data: List[Dict], cepci: CEPCIOptio
             total_bare_module_cost += costs.get("bare_module_cost", 0.0)
             
         except Exception as e:
-            results.append({"name": name, "category": category, "error": str(e)})
+            # 에러 발생 시 디버깅 정보 수집
+            error_debug = []
+            error_debug.append(f"Error: {str(e)}")
+            error_debug.append(f"Category: {category}")
+            error_debug.append(f"Selected Type: {device.get('selected_type')}")
+            error_debug.append(f"Selected Subtype: {device.get('selected_subtype')}")
+            
+            # 카테고리별 주요 입력 데이터 표시
+            if category == 'Pump':
+                error_debug.append(f"Power: {device.get('power_value')} {device.get('power_unit')}")
+                error_debug.append(f"Operating Pressure: {device.get('operating_pressure_value')} {device.get('operating_pressure_unit')}")
+            elif category == 'Compr':
+                error_debug.append(f"Power: {device.get('power_value')} {device.get('power_unit')}")
+            elif category == 'MCompr':
+                stage_data = device.get('stage_data', [])
+                error_debug.append(f"Number of stages: {len(stage_data)}")
+                for i, stage in enumerate(stage_data, 1):
+                    error_debug.append(f"  Stage {i} power: {stage.get('power_value')} {stage.get('power_unit')}")
+            elif category in ('Heater', 'Cooler', 'HeatX', 'Condenser'):
+                error_debug.append(f"Heat Duty (Q): {device.get('heat_duty_value')} {device.get('heat_duty_unit')}")
+                error_debug.append(f"Heat Transfer Coeff (U): {device.get('heat_transfer_coefficient_value')} {device.get('heat_transfer_coefficient_unit')}")
+                error_debug.append(f"LMTD: {device.get('log_mean_temp_difference_value')} {device.get('log_mean_temp_difference_unit')}")
+                error_debug.append(f"Shell Pressure: {device.get('shell_pressure_value')} {device.get('shell_pressure_unit')}")
+                error_debug.append(f"Tube Pressure: {device.get('tube_pressure_value')} {device.get('tube_pressure_unit')}")
+            elif category in ('Flash', 'Sep'):
+                error_debug.append(f"Volume: {device.get('volume_value')} {device.get('volume_unit')}")
+                error_debug.append(f"Max Pressure: {device.get('operating_pressure_value')} {device.get('operating_pressure_unit')}")
+            elif category in ('RStoic', 'RCSTR', 'RPlug', 'RBatch', 'REquil', 'RYield'):
+                error_debug.append(f"Volume: {device.get('volume_value')} {device.get('volume_unit')}")
+                error_debug.append(f"Pressure: {device.get('operating_pressure_value')} {device.get('operating_pressure_unit')}")
+            
+            results.append({"name": name, "category": category, "error": str(e), "error_debug": error_debug})
 
     return {"results": results, "total_bare_module_cost": total_bare_module_cost}
 
@@ -960,11 +992,9 @@ def estimate_turbine_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, 
     if inputs.power_value is None or inputs.power_unit is None:
         raise ValueError("Missing power value or unit for turbine")
         
-    power_kw = unit_converter.convert_units(inputs.power_value, inputs.power_unit, 'kW', 'POWER')
-    # 터빈은 출력이므로 파워가 음수일 때 양수로 변환
-    if power_kw is not None and power_kw < 0:
-        power_kw = abs(power_kw)
-    _push(debug_steps, f"S=Power={inputs.power_value} {inputs.power_unit} → {power_kw:.2f} kW")
+    power_kw = abs(unit_converter.convert_units(inputs.power_value, inputs.power_unit, 'kW', 'POWER'))
+
+    _push(debug_steps, f"S=Power={inputs.power_value:.2f} {inputs.power_unit} → {power_kw:.2f} kW")
     subtype = inputs.selected_subtype
     settings = config.get_equipment_setting("turbine", subtype)
     coeffs = settings.get("correlation_coeffs")
@@ -999,8 +1029,8 @@ def estimate_turbine_cost(inputs: CostInputs, cepci: CEPCIOptions) -> Dict[str, 
     effective_bm = fixed_bm_factors.get(inputs.material, fixed_bm_factors.get(config.DEFAULT_MATERIAL))
     
     bare_module_cost = purchased_adj * effective_bm
-    _push(debug_steps, f"BM = {effective_bm:.3f}")
-    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.3f} = {bare_module_cost:,.2f}")
+    _push(debug_steps, f"BM = {effective_bm:.2f}")
+    _push(debug_steps, f"Bare Module Cost = {purchased_adj:,.2f} × {effective_bm:.2f} = {bare_module_cost:,.2f}")
     
     return {
         "purchased_base": purchased_base,
